@@ -205,9 +205,14 @@ aabb3 calculateMeshBounds(std::vector<SimpleMesh>& meshes)
 int main()
 {
     // TODO: Take these as command line parameters!
+#if 0
+    std::string path = "../assets/Cube/Cube.gltf";
+    std::string outfile = "../assets/Cube.vox";
+#else
     std::string path = "../assets/BoomBox/BoomBoxWithAxes.gltf";
     std::string outfile = "../assets/BoomBox.vox";
-    size_t gridDimensions = 32;
+#endif
+    size_t gridDimensions = 126;
 
     auto [basePath, model] = loadModel(path);
 

@@ -18,6 +18,17 @@ VoxelGrid::VoxelGrid(glm::ivec3 size, aabb3 bounds)
     m_grid.resize(totalSize);
 }
 
+ivec3 VoxelGrid::remapToGridSpace(vec3 point, float (*roundingFunc)(float)) const
+{
+    vec3 normalized = (point - m_bounds.min) / (m_bounds.max - m_bounds.min);
+    vec3 floatGridSpace = normalized * vec3(m_sx - 1, m_sy - 1, m_sz - 1);
+
+    int x = (int)roundingFunc(floatGridSpace.x);
+    int y = (int)roundingFunc(floatGridSpace.y);
+    int z = (int)roundingFunc(floatGridSpace.z);
+    return { x, y, z };
+}
+
 size_t VoxelGrid::numFilledVoxels() const
 {
     size_t count = 0;
@@ -46,13 +57,8 @@ void VoxelGrid::set(int x, int y, int z, uint8_t value)
 
 void VoxelGrid::set(vec3 point, uint8_t value)
 {
-    vec3 normalized = (point - m_bounds.min) / (m_bounds.max - m_bounds.min);
-    vec3 gridSpace = normalized * vec3(m_sx - 1, m_sy - 1, m_sz - 1);
-
-    int x = (int)round(gridSpace.x);
-    int y = (int)round(gridSpace.y);
-    int z = (int)round(gridSpace.z);
-    set(x, y, z, value);
+    ivec3 grid = remapToGridSpace(point, std::round);
+    set(grid.x, grid.y, grid.z, value);
 }
 
 void VoxelGrid::insertMesh(const SimpleMesh& mesh)
@@ -60,45 +66,45 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh)
     // TODO: Use colors instead!
     uint8_t value = 1;
 
-#if 1
     vec3 voxelSize = (m_bounds.max - m_bounds.min) / vec3(m_sx, m_sy, m_sz);
     vec3 voxelHalfSize = 0.5f * voxelSize;
 
     vec3 centerOfFirst = m_bounds.min + voxelHalfSize;
 
-    float triangleVertices[3][3];
-
     size_t numTris = mesh.triangleCount();
     for (size_t ti = 0; ti < numTris; ++ti) {
 
-        mesh.triangle(ti, triangleVertices);
+        float triVerts[3][3];
+        mesh.triangle(ti, triVerts);
 
-        // TODO: OpenMP would be nice here .. if only the compiler supported it.
-        for (size_t z = 0; z < m_sz; ++z) {
-            for (size_t y = 0; y < m_sy; ++y) {
-                for (size_t x = 0; x < m_sx; ++x) {
+        float minX = std::min(triVerts[0][0], std::min(triVerts[1][0], triVerts[2][0]));
+        float minY = std::min(triVerts[0][1], std::min(triVerts[1][1], triVerts[2][1]));
+        float minZ = std::min(triVerts[0][2], std::min(triVerts[1][2], triVerts[2][2]));
+
+        float maxX = std::max(triVerts[0][0], std::max(triVerts[1][0], triVerts[2][0]));
+        float maxY = std::max(triVerts[0][1], std::max(triVerts[1][1], triVerts[2][1]));
+        float maxZ = std::max(triVerts[0][2], std::max(triVerts[1][2], triVerts[2][2]));
+
+        ivec3 gridFirst = remapToGridSpace({ minX, minY, minZ }, [](float val) {
+            return std::floor(val);
+        });
+        ivec3 gridLast = remapToGridSpace({ maxX, maxY, maxZ }, [](float val) {
+            return std::ceil(val);
+        });
+
+        for (size_t z = gridFirst.z; z <= gridLast.z; ++z) {
+            for (size_t y = gridFirst.y; y <= gridLast.y; ++y) {
+                for (size_t x = gridFirst.x; x <= gridLast.x; ++x) {
 
                     vec3 voxelCenter = centerOfFirst + (vec3(x, y, z) * voxelSize);
 
-                    if (triBoxOverlap(value_ptr(voxelCenter), value_ptr(voxelHalfSize), triangleVertices)) {
+                    if (triBoxOverlap(value_ptr(voxelCenter), value_ptr(voxelHalfSize), triVerts)) {
                         set(x, y, z, value);
-
-                        // TODO: We can probably break at this point? There could be more than one triangle at each voxel
-                        //  unless the voxels are tiny, and in theory we might want to blend colors between them. But for now
-                        //  we don't even consider colors, so it should be perfectly fine to break out here.
-                        break;
                     }
                 }
             }
         }
     }
-
-#else
-    for (size_t i = 0; i < mesh.vertexCount(); ++i) {
-        vec3 position = mesh.positions()[i];
-        set(position, value);
-    }
-#endif
 }
 
 void VoxelGrid::writeToVox(const std::string& path) const
@@ -135,7 +141,6 @@ void VoxelGrid::writeToVox(const std::string& path) const
     writeUInt32(xyziBuffer, numFilledVoxels());
 
     for (size_t z = 0; z < m_sz; ++z) {
-        int numWritten = 0;
         for (size_t y = 0; y < m_sy; ++y) {
             for (size_t x = 0; x < m_sx; ++x) {
                 uint8_t voxel = get(x, y, z);
@@ -147,12 +152,9 @@ void VoxelGrid::writeToVox(const std::string& path) const
                     writeUInt8(xyziBuffer, z);
                     writeUInt8(xyziBuffer, y);
                     writeUInt8(xyziBuffer, voxel);
-                    numWritten += 1;
                 }
             }
         }
-        fmt::print("Wrote {} voxels for z={}\n", numWritten, z);
-        numWritten = 0;
     }
 
     std::ostringstream mainBuffer {};
