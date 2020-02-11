@@ -114,6 +114,40 @@ std::vector<vec2> texcoordData(const Model& model, const tinygltf::Primitive& pr
     return vec;
 }
 
+std::vector<size_t> indexData(const Model& model, const tinygltf::Primitive& primitive)
+{
+    assert(primitive.indices != -1);
+    const tinygltf::Accessor accessor = model.accessors[primitive.indices];
+    assert(accessor.type == TINYGLTF_TYPE_SCALAR);
+
+    const tinygltf::BufferView& view = model.bufferViews[accessor.bufferView];
+    assert(view.byteStride == 0); // (i.e. tightly packed)
+
+    const tinygltf::Buffer& buffer = model.buffers[view.buffer];
+    const unsigned char* start = buffer.data.data() + view.byteOffset;
+
+    std::vector<size_t> indexData;
+    indexData.reserve(accessor.count);
+
+    if (accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
+        auto* first = reinterpret_cast<const uint16_t*>(start);
+        for (size_t i = 0; i < accessor.count; ++i) {
+            size_t index = *(first + i);
+            indexData.emplace_back(index);
+        }
+    } else if (accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) {
+        auto* first = reinterpret_cast<const uint32_t*>(start);
+        for (size_t i = 0; i < accessor.count; ++i) {
+            size_t index = *(first + i);
+            indexData.emplace_back(index);
+        }
+    } else {
+        assert(false);
+    }
+
+    return indexData;
+}
+
 std::string baseColorTextureURI(const Model& model, const Primitive& primitive)
 {
     assert(primitive.material != -1);
@@ -136,7 +170,7 @@ void bakeDownMesh(const Model& model, const std::string& basePath, std::vector<S
             auto& mesh = model.meshes[node.mesh];
             for (auto& primitive : mesh.primitives) {
                 std::string texturePath = basePath + baseColorTextureURI(model, primitive);
-                simpleMeshes.emplace_back(bakedPositionData(model, primitive, matrix), texcoordData(model, primitive), texturePath);
+                simpleMeshes.emplace_back(bakedPositionData(model, primitive, matrix), texcoordData(model, primitive), indexData(model, primitive), texturePath);
             }
         }
 
@@ -172,7 +206,8 @@ int main()
 {
     // TODO: Take these as command line parameters!
     std::string path = "../assets/BoomBox/BoomBoxWithAxes.gltf";
-    size_t gridDimensions = 126;
+    std::string outfile = "../assets/BoomBox.vox";
+    size_t gridDimensions = 32;
 
     auto [basePath, model] = loadModel(path);
 
@@ -182,11 +217,15 @@ int main()
     aabb3 boundsOfAllMeshes = calculateMeshBounds(simpleMeshes);
     VoxelGrid grid { glm::ivec3(gridDimensions), boundsOfAllMeshes };
 
-    for (auto& mesh : simpleMeshes) {
-        grid.insertMesh(mesh);
+    fmt::print("= voxelization begin = \n");
+    {
+        size_t numMeshes = simpleMeshes.size();
+        for (size_t i = 0; i < numMeshes; ++i) {
+            fmt::print(" mesh {}/{}\n", i + 1, numMeshes);
+            grid.insertMesh(simpleMeshes[i]);
+        }
     }
+    fmt::print("\n= voxelization done  =\n");
 
-    grid.writeToVox("../assets/BoomBox.vox");
-
-    return 0;
+    grid.writeToVox(outfile);
 }

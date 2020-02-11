@@ -1,5 +1,6 @@
 #include "VoxelGrid.h"
 
+#include "tribox3.h"
 #include <fmt/printf.h>
 #include <fstream>
 #include <sstream>
@@ -11,9 +12,7 @@ VoxelGrid::VoxelGrid(glm::ivec3 size, aabb3 bounds)
     , m_sz(size.z)
 {
     size_t totalSize = size.x * size.y * size.z;
-
-    constexpr size_t maxReasonableSize { 4ul * 1024ul * 1024ul * 1024ul };
-    assert(totalSize < maxReasonableSize);
+    assert(totalSize < 4ul * 1024ul * 1024ul * 1024ul);
 
     // note: this will allocate the whole dense grid
     m_grid.resize(totalSize);
@@ -58,15 +57,48 @@ void VoxelGrid::set(vec3 point, uint8_t value)
 
 void VoxelGrid::insertMesh(const SimpleMesh& mesh)
 {
-    // TODO: Perform proper triangle-aabb intersection!
-
     // TODO: Use colors instead!
     uint8_t value = 1;
 
+#if 1
+    vec3 voxelSize = (m_bounds.max - m_bounds.min) / vec3(m_sx, m_sy, m_sz);
+    vec3 voxelHalfSize = 0.5f * voxelSize;
+
+    vec3 centerOfFirst = m_bounds.min + voxelHalfSize;
+
+    float triangleVertices[3][3];
+
+    size_t numTris = mesh.triangleCount();
+    for (size_t ti = 0; ti < numTris; ++ti) {
+
+        mesh.triangle(ti, triangleVertices);
+
+        // TODO: OpenMP would be nice here .. if only the compiler supported it.
+        for (size_t z = 0; z < m_sz; ++z) {
+            for (size_t y = 0; y < m_sy; ++y) {
+                for (size_t x = 0; x < m_sx; ++x) {
+
+                    vec3 voxelCenter = centerOfFirst + (vec3(x, y, z) * voxelSize);
+
+                    if (triBoxOverlap(value_ptr(voxelCenter), value_ptr(voxelHalfSize), triangleVertices)) {
+                        set(x, y, z, value);
+
+                        // TODO: We can probably break at this point? There could be more than one triangle at each voxel
+                        //  unless the voxels are tiny, and in theory we might want to blend colors between them. But for now
+                        //  we don't even consider colors, so it should be perfectly fine to break out here.
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+#else
     for (size_t i = 0; i < mesh.vertexCount(); ++i) {
         vec3 position = mesh.positions()[i];
         set(position, value);
     }
+#endif
 }
 
 void VoxelGrid::writeToVox(const std::string& path) const
