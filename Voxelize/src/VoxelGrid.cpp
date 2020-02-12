@@ -1,7 +1,7 @@
 #include "VoxelGrid.h"
 
 #include "tribox3.h"
-#include <fmt/printf.h>
+#include <fmt/format.h>
 #include <fstream>
 #include <sstream>
 
@@ -43,16 +43,20 @@ size_t VoxelGrid::numFilledVoxels() const
     return count;
 }
 
-uint8_t VoxelGrid::get(int x, int y, int z) const
+uint64_t VoxelGrid::linearIndex(int x, int y, int z) const
 {
     assert(x >= 0 && x < m_sx && y >= 0 && y < m_sy && z >= 0 && z < m_sz);
-    return m_grid[x + y * (m_sx) + z * (m_sx * m_sy)];
+    return x + y * (m_sx) + z * (m_sx * m_sy);
+}
+
+uint8_t VoxelGrid::get(int x, int y, int z) const
+{
+    return m_grid[linearIndex(x, y, z)];
 }
 
 void VoxelGrid::set(int x, int y, int z, uint8_t value)
 {
-    assert(x >= 0 && x < m_sx && y >= 0 && y < m_sy && z >= 0 && z < m_sz);
-    m_grid[x + y * (m_sx) + z * (m_sx * m_sy)] = value;
+    m_grid[linearIndex(x, y, z)] = value;
 }
 
 void VoxelGrid::set(vec3 point, uint8_t value)
@@ -61,11 +65,8 @@ void VoxelGrid::set(vec3 point, uint8_t value)
     set(grid.x, grid.y, grid.z, value);
 }
 
-void VoxelGrid::insertMesh(const SimpleMesh& mesh)
+void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurface)
 {
-    // TODO: Use colors instead!
-    uint8_t value = 1;
-
     vec3 voxelSize = (m_bounds.max - m_bounds.min) / vec3(m_sx, m_sy, m_sz);
     vec3 voxelHalfSize = 0.5f * voxelSize;
 
@@ -85,12 +86,8 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh)
         float maxY = std::max(triVerts[0][1], std::max(triVerts[1][1], triVerts[2][1]));
         float maxZ = std::max(triVerts[0][2], std::max(triVerts[1][2], triVerts[2][2]));
 
-        ivec3 gridFirst = remapToGridSpace({ minX, minY, minZ }, [](float val) {
-            return std::floor(val);
-        });
-        ivec3 gridLast = remapToGridSpace({ maxX, maxY, maxZ }, [](float val) {
-            return std::ceil(val);
-        });
+        ivec3 gridFirst = remapToGridSpace({ minX, minY, minZ }, std::floor);
+        ivec3 gridLast = remapToGridSpace({ maxX, maxY, maxZ }, std::ceil);
 
         for (size_t z = gridFirst.z; z <= gridLast.z; ++z) {
             for (size_t y = gridFirst.y; y <= gridLast.y; ++y) {
@@ -99,8 +96,47 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh)
                     vec3 voxelCenter = centerOfFirst + (vec3(x, y, z) * voxelSize);
 
                     if (triBoxOverlap(value_ptr(voxelCenter), value_ptr(voxelHalfSize), triVerts)) {
+                        uint8_t value = 1;
+                        if (assignVoxelColorsToSurface) {
+                            // TODO: Project voxelCenter onto triangle, lerp UVs, and sample the texture.
+                        }
+
                         set(x, y, z, value);
+
+                        uint64_t index = linearIndex(x, y, z);
+                        m_trianglesForVoxelIndex[index].push_back({ &mesh, ti });
                     }
+                }
+            }
+        }
+    }
+}
+
+void VoxelGrid::fillVolumes(const std::vector<SimpleMesh>& meshes)
+{
+    for (size_t z = 0; z < m_sz; ++z) {
+        for (size_t y = 0; y < m_sy; ++y) {
+
+            bool filling = false;
+
+            for (size_t x = 0; x < m_sx; ++x) {
+
+                uint8_t value = get(x, y, z);
+                if (value == 0) {
+                    if (filling) {
+                        set(x, y, z, 1);
+                    }
+                    continue;
+                }
+
+                auto& triangleRefs = m_trianglesForVoxelIndex[linearIndex(x, y, z)];
+                fmt::print("[{},{},{}]: #{}\n", x, y, z, triangleRefs.size());
+                for (auto& [mesh, triangleIdx] : triangleRefs) {
+
+                    float triVerts[3][3];
+                    mesh->triangle(triangleIdx, triVerts);
+
+                    //vec3 normal = ...
                 }
             }
         }

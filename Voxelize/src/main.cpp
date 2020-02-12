@@ -222,15 +222,16 @@ int main()
     aabb3 boundsOfAllMeshes = calculateMeshBounds(simpleMeshes);
     VoxelGrid grid { glm::ivec3(gridDimensions), boundsOfAllMeshes };
 
-    fmt::print("= voxelization begin = \n");
-    {
-        size_t numMeshes = simpleMeshes.size();
-        for (size_t i = 0; i < numMeshes; ++i) {
-            fmt::print(" mesh {}/{}\n", i + 1, numMeshes);
-            grid.insertMesh(simpleMeshes[i]);
-        }
+    fmt::print("= voxelization begin =\n");
+    for (size_t i = 0; i < simpleMeshes.size(); ++i) {
+        fmt::print(" mesh {}/{}\n", i + 1, simpleMeshes.size());
+        grid.insertMesh(simpleMeshes[i], true);
     }
-    fmt::print("\n= voxelization done  =\n");
+    fmt::print("= voxelization done  =\n");
+
+    fmt::print("= volume filling begin =\n");
+    grid.fillVolumes(simpleMeshes);
+    fmt::print("= volume filling done  =\n");
 
     grid.writeToVox(outfile);
 }
