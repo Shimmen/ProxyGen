@@ -15,9 +15,9 @@ public:
 
     [[nodiscard]] uint64_t linearIndex(int x, int y, int z) const;
 
-    [[nodiscard]] uint8_t get(int x, int y, int z) const;
-    void set(int x, int y, int z, uint8_t);
-    void set(vec3 point, uint8_t);
+    [[nodiscard]] uint32_t get(int x, int y, int z) const;
+    void set(int x, int y, int z, uint32_t);
+    void set(vec3 point, uint32_t);
 
     void insertMesh(const SimpleMesh&, bool assignVoxelColorsToSurface);
     void fillVolumes(const std::vector<SimpleMesh>&);
@@ -27,7 +27,9 @@ public:
 private:
     aabb3 m_bounds;
     size_t m_sx, m_sy, m_sz;
-    std::vector<uint8_t> m_grid;
+
+    std::vector<uint32_t> m_grid;
+    std::vector<vec3> m_colors;
 
     struct TriangleRef {
         const SimpleMesh* mesh;

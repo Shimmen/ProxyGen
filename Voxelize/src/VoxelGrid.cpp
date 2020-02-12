@@ -49,17 +49,17 @@ uint64_t VoxelGrid::linearIndex(int x, int y, int z) const
     return x + y * (m_sx) + z * (m_sx * m_sy);
 }
 
-uint8_t VoxelGrid::get(int x, int y, int z) const
+uint32_t VoxelGrid::get(int x, int y, int z) const
 {
     return m_grid[linearIndex(x, y, z)];
 }
 
-void VoxelGrid::set(int x, int y, int z, uint8_t value)
+void VoxelGrid::set(int x, int y, int z, uint32_t value)
 {
     m_grid[linearIndex(x, y, z)] = value;
 }
 
-void VoxelGrid::set(vec3 point, uint8_t value)
+void VoxelGrid::set(vec3 point, uint32_t value)
 {
     ivec3 grid = remapToGridSpace(point, std::round);
     set(grid.x, grid.y, grid.z, value);
@@ -91,7 +91,7 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurfa
                     vec3 voxelCenter = centerOfFirst + (vec3(x, y, z) * voxelSize);
 
                     if (triangleBoxIntersection(voxelCenter, voxelHalfSize, v)) {
-                        uint8_t value = 1;
+                        uint32_t value = 1;
                         if (assignVoxelColorsToSurface) {
 
                             // Compute barycentric coordinates of point projected onto the triangle
@@ -114,6 +114,9 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurfa
                                 vec2 uv = alpha * uv0 + beta * uv1 + gamma * uv2;
                                 vec3 color = mesh.texture().sample(uv);
 
+                                value = m_colors.size();
+                                m_colors.push_back(color);
+
                                 fmt::print("got color {}, {}, {}\n", color.r, color.g, color.b);
                             } else {
                                 fmt::print("no color luck\n");
@@ -129,6 +132,8 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurfa
             }
         }
     }
+
+    fmt::print("Num colors: {}\n", m_colors.size());
 }
 
 void VoxelGrid::fillVolumes(const std::vector<SimpleMesh>& meshes)
