@@ -197,33 +197,33 @@ void VoxelGrid::writeToVox(const std::string& path) const
     auto writeLabel = [](std::ostream& stream, const char* label) {
         stream.write(label, strlen(label));
     };
-    auto writeUInt32 = [](std::ostream& stream, uint32_t value) {
+    auto writeInt32 = [](std::ostream& stream, int32_t value) {
         stream.write((const char*)&value, 4);
     };
     auto writeUInt8 = [](std::ostream& stream, uint8_t value) {
         stream.write((const char*)&value, 1);
     };
-    auto writeChunkHeader = [&](std::ostream& stream, const char* chunkId, uint32_t sizeOfSelf, uint32_t sizeOfChildren) {
+    auto writeChunkHeader = [&](std::ostream& stream, const char* chunkId, int32_t sizeOfSelf, int32_t sizeOfChildren) {
         writeLabel(stream, chunkId);
-        writeUInt32(stream, sizeOfSelf);
-        writeUInt32(stream, sizeOfChildren);
+        writeInt32(stream, sizeOfSelf);
+        writeInt32(stream, sizeOfChildren);
     };
     auto writeBuffer = [&](std::ostream& stream, std::ostringstream& source) {
         std::string content = source.str();
         stream << content;
     };
 
-    uint32_t sx = std::min(m_sx, 126ul);
-    uint32_t sy = std::min(m_sy, 126ul);
-    uint32_t sz = std::min(m_sz, 126ul);
+    int32_t sx = std::min(m_sx, 126ul);
+    int32_t sy = std::min(m_sy, 126ul);
+    int32_t sz = std::min(m_sz, 126ul);
 
     std::ostringstream sizeBuffer {};
-    writeUInt32(sizeBuffer, sx);
-    writeUInt32(sizeBuffer, sy);
-    writeUInt32(sizeBuffer, sz);
+    writeInt32(sizeBuffer, sx);
+    writeInt32(sizeBuffer, sy);
+    writeInt32(sizeBuffer, sz);
 
     std::ostringstream xyziBuffer {};
-    writeUInt32(xyziBuffer, numFilledVoxels());
+    writeInt32(xyziBuffer, numFilledVoxels());
 
     for (size_t z = 0; z < m_sz; ++z) {
         for (size_t y = 0; y < m_sy; ++y) {
@@ -242,17 +242,25 @@ void VoxelGrid::writeToVox(const std::string& path) const
         }
     }
 
+    std::ostringstream rgbaBuffer {};
+    for (int i = 0; i < 256; ++i) {
+        int32_t color = (i == 0) ? 0xff000000 : 0xffff00ff;
+        writeInt32(rgbaBuffer, color);
+    }
+
     std::ostringstream mainBuffer {};
     writeChunkHeader(mainBuffer, "SIZE", sizeBuffer.tellp(), 0);
     writeBuffer(mainBuffer, sizeBuffer);
     writeChunkHeader(mainBuffer, "XYZI", xyziBuffer.tellp(), 0);
     writeBuffer(mainBuffer, xyziBuffer);
+    writeChunkHeader(mainBuffer, "RGBA", rgbaBuffer.tellp(), 0);
+    writeBuffer(mainBuffer, rgbaBuffer);
 
     std::ofstream file;
     file.open(path, std::ios::binary | std::ios::out);
 
     writeLabel(file, "VOX ");
-    writeUInt32(file, 150u);
+    writeInt32(file, 150);
 
     writeChunkHeader(file, "MAIN", 0, mainBuffer.tellp());
     writeBuffer(file, mainBuffer);
