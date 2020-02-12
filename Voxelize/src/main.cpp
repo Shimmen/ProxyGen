@@ -205,13 +205,8 @@ aabb3 calculateMeshBounds(std::vector<SimpleMesh>& meshes)
 int main()
 {
     // TODO: Take these as command line parameters!
-#if 0
-    std::string path = "../assets/Cube/Cube.gltf";
-    std::string outfile = "../assets/Cube.vox";
-#else
     std::string path = "../assets/BoomBox/BoomBoxWithAxes.gltf";
     std::string outfile = "../assets/BoomBox.vox";
-#endif
     size_t gridDimensions = 126;
 
     auto [basePath, model] = loadModel(path);
@@ -228,6 +223,10 @@ int main()
         grid.insertMesh(simpleMeshes[i], true);
     }
     fmt::print("= voxelization done  =\n");
+
+    fmt::print("= color quantization begin =\n");
+    grid.quantizeColors(256);
+    fmt::print("= color quantization done  =\n");
 
     fmt::print("= volume filling begin =\n");
     grid.fillVolumes(simpleMeshes);

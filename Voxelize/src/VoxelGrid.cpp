@@ -132,8 +132,6 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurfa
             }
         }
     }
-
-    fmt::print("Num colors: {}\n", m_colors.size());
 }
 
 void VoxelGrid::fillVolumes(const std::vector<SimpleMesh>& meshes)
@@ -186,6 +184,11 @@ void VoxelGrid::fillVolumes(const std::vector<SimpleMesh>& meshes)
             }
         }
     }
+}
+
+void VoxelGrid::quantizeColors(uint32_t numBins)
+{
+    // TODO!
 }
 
 void VoxelGrid::writeToVox(const std::string& path) const
@@ -242,19 +245,31 @@ void VoxelGrid::writeToVox(const std::string& path) const
         }
     }
 
-    std::ostringstream rgbaBuffer {};
-    for (int i = 0; i < 256; ++i) {
-        int32_t color = (i == 0) ? 0xff000000 : 0xffff00ff;
-        writeInt32(rgbaBuffer, color);
-    }
-
     std::ostringstream mainBuffer {};
     writeChunkHeader(mainBuffer, "SIZE", sizeBuffer.tellp(), 0);
     writeBuffer(mainBuffer, sizeBuffer);
     writeChunkHeader(mainBuffer, "XYZI", xyziBuffer.tellp(), 0);
     writeBuffer(mainBuffer, xyziBuffer);
-    writeChunkHeader(mainBuffer, "RGBA", rgbaBuffer.tellp(), 0);
-    writeBuffer(mainBuffer, rgbaBuffer);
+
+    if (!m_colors.empty()) {
+        if (m_colors.size() > 256) {
+            fmt::print("VoxelGrid::writeToVox(): more than 256 colors defined, will be truncated!\n");
+        }
+        std::ostringstream rgbaBuffer {};
+
+        for (int i = 0; i < 256; ++i) {
+            if (i < m_colors.size()) {
+                ivec3 color = ivec3(m_colors[i] * 255.99f);
+                int32_t colorInt = (0xFF << 24) | (color.r << 16) | (color.g << 8) | (color.b);
+                writeInt32(rgbaBuffer, colorInt);
+            } else {
+                writeInt32(rgbaBuffer, 0xFFFF00FF);
+            }
+        }
+
+        writeChunkHeader(mainBuffer, "RGBA", rgbaBuffer.tellp(), 0);
+        writeBuffer(mainBuffer, rgbaBuffer);
+    }
 
     std::ofstream file;
     file.open(path, std::ios::binary | std::ios::out);
