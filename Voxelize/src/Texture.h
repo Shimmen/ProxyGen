@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mathkit.h"
 #include <stb_image.h>
 #include <string>
 
@@ -7,6 +8,8 @@ class Texture {
 public:
     explicit Texture(std::string path);
     ~Texture();
+
+    vec3 sample(vec2 uv) const;
 
 private:
     std::string m_path;

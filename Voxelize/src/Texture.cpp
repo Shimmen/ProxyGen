@@ -19,3 +19,29 @@ Texture::~Texture()
     //    stbi_image_free(m_pixels);
     //}
 }
+
+vec3 Texture::sample(vec2 uv) const
+{
+    vec2 pixelCoords = uv * vec2(m_width - 1, m_height - 1);
+    ivec2 nearest = round(pixelCoords);
+
+    int idx = m_numComponents * (nearest.x + nearest.y * m_width);
+
+    float r = float(m_pixels[idx + 0]) / UINT8_MAX;
+    if (m_numComponents == 1) {
+        return { r, r, r };
+    }
+
+    float g = float(m_pixels[idx + 1]) / UINT8_MAX;
+    if (m_numComponents == 2) {
+        return { r, g, 0.0f };
+    }
+
+    if (m_numComponents >= 3) {
+        float b = float(m_pixels[idx + 2]) / UINT8_MAX;
+        return { r, g, b };
+    }
+
+    assert(false);
+    return {};
+}
