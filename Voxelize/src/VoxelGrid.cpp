@@ -93,7 +93,31 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurfa
                     if (triangleBoxIntersection(voxelCenter, voxelHalfSize, v)) {
                         uint8_t value = 1;
                         if (assignVoxelColorsToSurface) {
-                            // TODO: Project voxelCenter onto triangle, lerp UVs, and sample the texture.
+
+                            // Compute barycentric coordinates of point projected onto the triangle
+                            // https://math.stackexchange.com/questions/544946/determine-if-projection-of-3d-point-onto-plane-is-within-a-triangle
+
+                            vec3 e1 = v[1] - v[0];
+                            vec3 e2 = v[2] - v[0];
+
+                            vec3 normal = normalize(cross(e1, e2));
+                            vec3 w = voxelCenter - v[0];
+
+                            float gamma = dot(normal, cross(e1, w));
+                            float beta = dot(normal, cross(w, e2));
+                            float alpha = 1.0f - gamma - beta;
+
+                            if (alpha >= 0.0f && alpha <= 1.0f && beta >= 0.0f && beta <= 1.0f && gamma >= 0.0f && gamma <= 1.0f) {
+                                vec2 uv0, uv1, uv2;
+                                mesh.triangleTexcoords(ti, uv0, uv1, uv2);
+
+                                vec2 uv = alpha * uv0 + beta * uv1 + gamma * uv2;
+                                vec3 color = mesh.texture().sample(uv);
+
+                                fmt::print("got color {}, {}, {}\n", color.r, color.g, color.b);
+                            } else {
+                                fmt::print("no color luck\n");
+                            }
                         }
 
                         set(x, y, z, value);

@@ -16,6 +16,7 @@ public:
 
     [[nodiscard]] size_t triangleCount() const;
     void triangle(size_t triangleIndex, vec3& v0, vec3& v1, vec3& v2) const;
+    void triangleTexcoords(size_t triangleIndex, vec2& uv0, vec2& uv1, vec2& uv2) const;
 
     void extendAABB(vec3& min, vec3& max) const;
 

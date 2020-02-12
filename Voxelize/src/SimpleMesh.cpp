@@ -45,6 +45,16 @@ void SimpleMesh::triangle(size_t triangleIndex, vec3& v0, vec3& v1, vec3& v2) co
     v2 = m_positions[i2];
 }
 
+void SimpleMesh::triangleTexcoords(size_t triangleIndex, vec2& uv0, vec2& uv1, vec2& uv2) const
+{
+    uint32_t i0 = m_indices[3 * triangleIndex + 0];
+    uint32_t i1 = m_indices[3 * triangleIndex + 1];
+    uint32_t i2 = m_indices[3 * triangleIndex + 2];
+    uv0 = m_texcoords[i0];
+    uv1 = m_texcoords[i1];
+    uv2 = m_texcoords[i2];
+}
+
 void SimpleMesh::extendAABB(vec3& min, vec3& max) const
 {
     for (const vec3& point : m_positions) {
