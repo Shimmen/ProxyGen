@@ -100,23 +100,28 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurfa
                             vec3 e1 = v[1] - v[0];
                             vec3 e2 = v[2] - v[0];
 
-                            vec3 normal = normalize(cross(e1, e2));
+                            vec3 normal = cross(e1, e2);
                             vec3 w = voxelCenter - v[0];
 
-                            float gamma = dot(normal, cross(e1, w));
-                            float beta = dot(normal, cross(w, e2));
+                            float gamma = dot(normal, cross(e1, w)) / length2(normal);
+                            float beta = dot(normal, cross(w, e2)) / length2(normal);
                             float alpha = 1.0f - gamma - beta;
 
-                            if (alpha >= 0.0f && alpha <= 1.0f && beta >= 0.0f && beta <= 1.0f && gamma >= 0.0f && gamma <= 1.0f) {
-                                vec2 uv0, uv1, uv2;
-                                mesh.triangleTexcoords(ti, uv0, uv1, uv2);
+                            // NOTE: In theory we might want to check that the barycentric constraints apply, but since we just take a single
+                            //  sample from the voxelCenter it's not going to be accurate anyway, and the UVs are probably going to be fine..
+                            //constexpr float eps = 0.5f;
+                            //constexpr float lo = 0.0f - eps;
+                            //constexpr float hi = 1.0f + eps;
+                            //if (alpha >= lo && alpha <= hi && beta >= lo && beta <= hi && gamma >= lo && gamma <= hi)
 
-                                vec2 uv = alpha * uv0 + gamma * uv1 + beta * uv2;
-                                vec3 color = mesh.texture().sample(uv);
+                            vec2 uv0, uv1, uv2;
+                            mesh.triangleTexcoords(ti, uv0, uv1, uv2);
 
-                                value = m_colors.size();
-                                m_colors.push_back(color);
-                            }
+                            vec2 uv = alpha * uv0 + beta * uv1 + gamma * uv2;
+                            vec3 color = mesh.texture().sample(uv);
+
+                            value = m_colors.size() + 1;
+                            m_colors.push_back(color);
                         }
 
                         set(x, y, z, value);
@@ -185,7 +190,7 @@ void VoxelGrid::fillVolumes(const std::vector<SimpleMesh>& meshes)
 void VoxelGrid::quantizeColors(uint32_t numBins)
 {
     assert(numBins > 0);
-    constexpr size_t numIterations = 2; // TODO!
+    constexpr size_t numIterations = 4; // TODO!
 
     //
     // Perform k-means clustering
@@ -254,9 +259,10 @@ void VoxelGrid::quantizeColors(uint32_t numBins)
 
     size_t totalSize = m_sx * m_sy * m_sz;
     for (size_t i = 0; i < totalSize; ++i) {
-        uint32_t colorIdx = m_grid[i];
-        if (colorIdx > 0) {
-            QColor& quantized = quantizedColors[colorIdx];
+        uint32_t value = m_grid[i];
+        if (value > 0) {
+            uint32_t colorIndex = value - 1;
+            QColor& quantized = quantizedColors[colorIndex];
             m_grid[i] = quantized.clusterIndex + 1;
         }
     }
@@ -333,7 +339,7 @@ void VoxelGrid::writeToVox(const std::string& path) const
         for (int i = 0; i < 256; ++i) {
             if (i < m_colors.size()) {
                 ivec3 color = ivec3(m_colors[i] * 255.99f);
-                int32_t colorInt = (0xFF << 24) | (color.r << 16) | (color.g << 8) | (color.b); // NOLINT(hicpp-signed-bitwise)
+                int32_t colorInt = (0xFF << 24) | (color.b << 16) | (color.g << 8) | (color.r); // NOLINT(hicpp-signed-bitwise)
                 writeInt32(rgbaBuffer, colorInt);
             } else {
                 writeInt32(rgbaBuffer, 0xFFFF00FF);

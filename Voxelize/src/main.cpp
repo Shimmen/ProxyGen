@@ -75,7 +75,7 @@ std::vector<vec3> bakedPositionData(const Model& model, const tinygltf::Primitiv
     assert(accessor.type == TINYGLTF_TYPE_VEC3);
 
     const tinygltf::BufferView& view = model.bufferViews[accessor.bufferView];
-    assert(view.byteStride == 0); // (i.e. tightly packed)
+    assert(view.byteStride == 0 || view.byteStride == 12); // (i.e. tightly packed)
 
     const tinygltf::Buffer& buffer = model.buffers[view.buffer];
 
@@ -103,7 +103,7 @@ std::vector<vec2> texcoordData(const Model& model, const tinygltf::Primitive& pr
     assert(accessor.type == TINYGLTF_TYPE_VEC2);
 
     const tinygltf::BufferView& view = model.bufferViews[accessor.bufferView];
-    assert(view.byteStride == 0); // (i.e. tightly packed)
+    assert(view.byteStride == 0 || view.byteStride == 8); // (i.e. tightly packed)
 
     const tinygltf::Buffer& buffer = model.buffers[view.buffer];
 
@@ -169,6 +169,7 @@ void bakeDownMesh(const Model& model, const std::string& basePath, std::vector<S
         if (node.mesh != -1) {
             auto& mesh = model.meshes[node.mesh];
             for (auto& primitive : mesh.primitives) {
+                assert(primitive.mode == TINYGLTF_MODE_TRIANGLES);
                 std::string texturePath = basePath + baseColorTextureURI(model, primitive);
                 simpleMeshes.emplace_back(bakedPositionData(model, primitive, matrix), texcoordData(model, primitive), indexData(model, primitive), texturePath);
             }
@@ -205,8 +206,8 @@ aabb3 calculateMeshBounds(std::vector<SimpleMesh>& meshes)
 int main()
 {
     // TODO: Take these as command line parameters!
-    std::string path = "../assets/BoomBox/BoomBoxWithAxes.gltf";
-    std::string outfile = "../assets/BoomBox.vox";
+    std::string path = "../assets/Avocado/Avocado.gltf";
+    std::string outfile = "../assets/Avocado.vox";
     size_t gridDimensions = 126;
 
     auto [basePath, model] = loadModel(path);
@@ -225,11 +226,11 @@ int main()
     fmt::print("= voxelization done  =\n");
 
     fmt::print("= color quantization begin =\n");
-    grid.quantizeColors(256);
+    grid.quantizeColors(250);
     fmt::print("= color quantization done  =\n");
 
     fmt::print("= volume filling begin =\n");
-    grid.fillVolumes(simpleMeshes);
+    //grid.fillVolumes(simpleMeshes);
     fmt::print("= volume filling done  =\n");
 
     grid.writeToVox(outfile);
