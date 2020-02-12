@@ -111,15 +111,11 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurfa
                                 vec2 uv0, uv1, uv2;
                                 mesh.triangleTexcoords(ti, uv0, uv1, uv2);
 
-                                vec2 uv = alpha * uv0 + beta * uv1 + gamma * uv2;
+                                vec2 uv = alpha * uv0 + gamma * uv1 + beta * uv2;
                                 vec3 color = mesh.texture().sample(uv);
 
                                 value = m_colors.size();
                                 m_colors.push_back(color);
-
-                                fmt::print("got color {}, {}, {}\n", color.r, color.g, color.b);
-                            } else {
-                                fmt::print("no color luck\n");
                             }
                         }
 
@@ -188,7 +184,84 @@ void VoxelGrid::fillVolumes(const std::vector<SimpleMesh>& meshes)
 
 void VoxelGrid::quantizeColors(uint32_t numBins)
 {
-    // TODO!
+    assert(numBins > 0);
+    constexpr size_t numIterations = 2; // TODO!
+
+    //
+    // Perform k-means clustering
+    //
+
+    struct QColor {
+        vec3 color;
+        int clusterIndex;
+    };
+
+    std::vector<vec3> clusters {};
+    for (uint32_t k = 0; k < numBins; ++k) {
+        size_t pointIdx = rand() % m_colors.size(); // NOLINT(cert-msc30-c,cert-msc50-cpp)
+        clusters.push_back(m_colors[pointIdx]);
+    }
+
+    std::vector<QColor> quantizedColors {};
+    for (const vec3& color : m_colors) {
+        quantizedColors.push_back({ color, -1 });
+    }
+
+    for (size_t it = 0; it < numIterations; ++it) {
+
+        // Find the closest cluster for each point
+
+        for (QColor& qColor : quantizedColors) {
+
+            int closestIndex = -1;
+            float closestVal = 999.99f;
+
+            for (uint32_t k = 0; k < numBins; ++k) {
+                const vec3& clusterCenter = clusters[k];
+                float dist2 = distance2(qColor.color, clusterCenter);
+                if (dist2 < closestVal) {
+                    closestVal = dist2;
+                    closestIndex = k;
+                }
+            }
+
+            qColor.clusterIndex = closestIndex;
+        }
+
+        // Move cluster centers to average position of all members
+
+        struct AvgPair {
+            vec3 sum { 0.0f };
+            int count { 0 };
+        };
+        std::vector<AvgPair> averagePairs { numBins };
+
+        for (QColor& qColor : quantizedColors) {
+            AvgPair& avgPair = averagePairs[qColor.clusterIndex];
+            avgPair.sum += qColor.color;
+            avgPair.count += 1;
+        }
+
+        for (uint32_t k = 0; k < numBins; ++k) {
+            AvgPair& avgPair = averagePairs[k];
+            clusters[k] = avgPair.sum / vec3(avgPair.count);
+        }
+    }
+
+    //
+    // Reassign color indices in the grid
+    //
+
+    size_t totalSize = m_sx * m_sy * m_sz;
+    for (size_t i = 0; i < totalSize; ++i) {
+        uint32_t colorIdx = m_grid[i];
+        if (colorIdx > 0) {
+            QColor& quantized = quantizedColors[colorIdx];
+            m_grid[i] = quantized.clusterIndex + 1;
+        }
+    }
+
+    m_colors = clusters;
 }
 
 void VoxelGrid::writeToVox(const std::string& path) const
@@ -260,7 +333,7 @@ void VoxelGrid::writeToVox(const std::string& path) const
         for (int i = 0; i < 256; ++i) {
             if (i < m_colors.size()) {
                 ivec3 color = ivec3(m_colors[i] * 255.99f);
-                int32_t colorInt = (0xFF << 24) | (color.r << 16) | (color.g << 8) | (color.b);
+                int32_t colorInt = (0xFF << 24) | (color.r << 16) | (color.g << 8) | (color.b); // NOLINT(hicpp-signed-bitwise)
                 writeInt32(rgbaBuffer, colorInt);
             } else {
                 writeInt32(rgbaBuffer, 0xFFFF00FF);
