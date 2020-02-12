@@ -109,6 +109,8 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurfa
 
 void VoxelGrid::fillVolumes(const std::vector<SimpleMesh>& meshes)
 {
+    const vec3 stepDirection = { 1, 0, 0 };
+
     for (size_t z = 0; z < m_sz; ++z) {
         for (size_t y = 0; y < m_sy; ++y) {
 
@@ -124,14 +126,33 @@ void VoxelGrid::fillVolumes(const std::vector<SimpleMesh>& meshes)
                     continue;
                 }
 
+                vec3 normal { 0.0f };
+
                 auto& triangleRefs = m_trianglesForVoxelIndex[linearIndex(x, y, z)];
-                fmt::print("[{},{},{}]: #{}\n", x, y, z, triangleRefs.size());
                 for (auto& [mesh, triangleIdx] : triangleRefs) {
 
                     vec3 v0, v1, v2;
                     mesh->triangle(triangleIdx, v0, v1, v2);
 
-                    //vec3 normal = ...
+                    vec3 triNormal = normalize(cross(v1 - v0, v2 - v0));
+                    normal += triNormal;
+                }
+
+                normal = normalize(normal);
+                float d = dot(normal, stepDirection);
+
+                // Be liberal when it comes to stopping the filling ...
+                if (filling && d > 0.0f) {
+                    filling = false;
+                    continue;
+                }
+
+                // ... but be conservative when it comes to starting it.
+                // This avoids errors where we don't stop and fill entire lines along the x-axis
+                // which is quite egregious. On the other hand, under filling is probably okay.
+                if (!filling && d < -0.4f) {
+                    filling = true;
+                    continue;
                 }
             }
         }
@@ -163,10 +184,14 @@ void VoxelGrid::writeToVox(const std::string& path) const
         stream << content;
     };
 
+    uint32_t sx = std::min(m_sx, 126ul);
+    uint32_t sy = std::min(m_sy, 126ul);
+    uint32_t sz = std::min(m_sz, 126ul);
+
     std::ostringstream sizeBuffer {};
-    writeUInt32(sizeBuffer, m_sx);
-    writeUInt32(sizeBuffer, m_sy);
-    writeUInt32(sizeBuffer, m_sz);
+    writeUInt32(sizeBuffer, sx);
+    writeUInt32(sizeBuffer, sy);
+    writeUInt32(sizeBuffer, sz);
 
     std::ostringstream xyziBuffer {};
     writeUInt32(xyziBuffer, numFilledVoxels());
@@ -179,7 +204,7 @@ void VoxelGrid::writeToVox(const std::string& path) const
                     if (x > 126 || y > 126 || z > 126) {
                         continue;
                     }
-                    writeUInt8(xyziBuffer, m_sx - x - 1);
+                    writeUInt8(xyziBuffer, sx - x - 1);
                     writeUInt8(xyziBuffer, z);
                     writeUInt8(xyziBuffer, y);
                     writeUInt8(xyziBuffer, voxel);
