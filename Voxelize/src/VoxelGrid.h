@@ -7,8 +7,6 @@
 
 class VoxelGrid {
 public:
-    static constexpr uint32_t Empty = 0u;
-
     VoxelGrid(glm::ivec3 size, aabb3 bounds);
 
     ivec3 remapToGridSpace(vec3, float (*roundingFunc)(float)) const;
