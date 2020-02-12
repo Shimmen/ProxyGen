@@ -35,29 +35,11 @@ size_t SimpleMesh::triangleCount() const
     return m_indices.size() / 3;
 }
 
-void SimpleMesh::triangle(size_t triangleIndex, float triangleVerts[3][3]) const
-{
-    uint32_t i0 = m_indices[3 * triangleIndex + 0];
-    triangleVerts[0][0] = m_positions[i0].x;
-    triangleVerts[0][1] = m_positions[i0].y;
-    triangleVerts[0][2] = m_positions[i0].z;
-
-    uint32_t i1 = m_indices[3 * triangleIndex + 1];
-    triangleVerts[1][0] = m_positions[i1].x;
-    triangleVerts[1][1] = m_positions[i1].y;
-    triangleVerts[1][2] = m_positions[i1].z;
-
-    uint32_t i2 = m_indices[3 * triangleIndex + 2];
-    triangleVerts[2][0] = m_positions[i2].x;
-    triangleVerts[2][1] = m_positions[i2].y;
-    triangleVerts[2][2] = m_positions[i2].z;
-}
-
 void SimpleMesh::triangle(size_t triangleIndex, vec3& v0, vec3& v1, vec3& v2) const
 {
     uint32_t i0 = m_indices[3 * triangleIndex + 0];
-    uint32_t i1 = m_indices[3 * triangleIndex + 0];
-    uint32_t i2 = m_indices[3 * triangleIndex + 0];
+    uint32_t i1 = m_indices[3 * triangleIndex + 1];
+    uint32_t i2 = m_indices[3 * triangleIndex + 2];
     v0 = m_positions[i0];
     v1 = m_positions[i1];
     v2 = m_positions[i2];

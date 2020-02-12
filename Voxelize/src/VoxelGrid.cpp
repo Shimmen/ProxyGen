@@ -75,19 +75,14 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurfa
     size_t numTris = mesh.triangleCount();
     for (size_t ti = 0; ti < numTris; ++ti) {
 
-        float triVerts[3][3];
-        mesh.triangle(ti, triVerts);
+        vec3 v[3];
+        mesh.triangle(ti, v[0], v[1], v[2]);
 
-        float minX = std::min(triVerts[0][0], std::min(triVerts[1][0], triVerts[2][0]));
-        float minY = std::min(triVerts[0][1], std::min(triVerts[1][1], triVerts[2][1]));
-        float minZ = std::min(triVerts[0][2], std::min(triVerts[1][2], triVerts[2][2]));
+        vec3 triangleMin = min(v[0], min(v[1], v[2]));
+        vec3 triangleMax = max(v[0], max(v[1], v[2]));
 
-        float maxX = std::max(triVerts[0][0], std::max(triVerts[1][0], triVerts[2][0]));
-        float maxY = std::max(triVerts[0][1], std::max(triVerts[1][1], triVerts[2][1]));
-        float maxZ = std::max(triVerts[0][2], std::max(triVerts[1][2], triVerts[2][2]));
-
-        ivec3 gridFirst = remapToGridSpace({ minX, minY, minZ }, std::floor);
-        ivec3 gridLast = remapToGridSpace({ maxX, maxY, maxZ }, std::ceil);
+        ivec3 gridFirst = remapToGridSpace(triangleMin, std::floor);
+        ivec3 gridLast = remapToGridSpace(triangleMax, std::ceil);
 
         for (size_t z = gridFirst.z; z <= gridLast.z; ++z) {
             for (size_t y = gridFirst.y; y <= gridLast.y; ++y) {
@@ -95,7 +90,7 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurfa
 
                     vec3 voxelCenter = centerOfFirst + (vec3(x, y, z) * voxelSize);
 
-                    if (triBoxOverlap(value_ptr(voxelCenter), value_ptr(voxelHalfSize), triVerts)) {
+                    if (triangleBoxIntersection(voxelCenter, voxelHalfSize, v)) {
                         uint8_t value = 1;
                         if (assignVoxelColorsToSurface) {
                             // TODO: Project voxelCenter onto triangle, lerp UVs, and sample the texture.
@@ -133,8 +128,8 @@ void VoxelGrid::fillVolumes(const std::vector<SimpleMesh>& meshes)
                 fmt::print("[{},{},{}]: #{}\n", x, y, z, triangleRefs.size());
                 for (auto& [mesh, triangleIdx] : triangleRefs) {
 
-                    float triVerts[3][3];
-                    mesh->triangle(triangleIdx, triVerts);
+                    vec3 v0, v1, v2;
+                    mesh->triangle(triangleIdx, v0, v1, v2);
 
                     //vec3 normal = ...
                 }

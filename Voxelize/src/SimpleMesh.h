@@ -15,7 +15,6 @@ public:
     [[nodiscard]] const std::vector<vec2>& texcoords() const;
 
     [[nodiscard]] size_t triangleCount() const;
-    void triangle(size_t triangleIndex, float triangleVerts[3][3]) const;
     void triangle(size_t triangleIndex, vec3& v0, vec3& v1, vec3& v2) const;
 
     void extendAABB(vec3& min, vec3& max) const;
