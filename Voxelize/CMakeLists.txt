@@ -1,27 +1,20 @@
 cmake_minimum_required(VERSION 3.7 FATAL_ERROR)
-project(Voxelize)
+project(ProxyGen)
 
 set(CMAKE_CXX_STANDARD 17)
 
-add_executable(Voxelize
-        src/voxelize.cpp
-        src/Texture.cpp
-        src/SimpleMesh.cpp
-        src/VoxelGrid.cpp
-        src/GltfUtil.cpp)
+set(PROXYGEN_WARNINGS
+        -Wall
+        -Wpedantic
+        -Wimplicit-fallthrough)
 
-target_compile_options(Voxelize PRIVATE -Wall)
-target_compile_options(Voxelize PRIVATE -Wimplicit-fallthrough)
+add_subdirectory(deps/)
+add_subdirectory(lib/)
 
-target_include_directories(Voxelize PRIVATE src/)
-target_include_directories(Voxelize PRIVATE deps/glm-0.9.9.6)
-target_include_directories(Voxelize PRIVATE deps/nlohmann_json)
+add_executable(Voxelize src/Voxelize.cpp)
+target_link_libraries(Voxelize PRIVATE ProxyGenLib)
+target_compile_options(Voxelize PRIVATE ${PROXYGEN_WARNINGS})
 
-add_subdirectory(deps/fmt)
-target_link_libraries(Voxelize fmt)
-
-add_subdirectory(deps/stb_image)
-target_link_libraries(Voxelize stb_image)
-
-add_subdirectory(deps/tiny_gltf)
-target_link_libraries(Voxelize tiny_gltf)
+add_executable(SphereSet src/SphereSet.cpp)
+target_link_libraries(SphereSet PRIVATE ProxyGenLib)
+target_compile_options(SphereSet PRIVATE ${PROXYGEN_WARNINGS})
