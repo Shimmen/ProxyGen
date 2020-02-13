@@ -10,14 +10,21 @@ public:
     VoxelGrid(glm::ivec3 size, aabb3 bounds);
 
     ivec3 remapToGridSpace(vec3, float (*roundingFunc)(float)) const;
+    vec3 voxelCenterPoint(ivec3) const;
+
+    ivec3 gridDimensions() const;
+    aabb3 gridBounds() const;
 
     [[nodiscard]] size_t numFilledVoxels() const;
 
+    [[nodiscard]] uint64_t linearIndex(ivec3 gridIndex) const;
     [[nodiscard]] uint64_t linearIndex(int x, int y, int z) const;
 
     [[nodiscard]] uint32_t get(int x, int y, int z) const;
     void set(int x, int y, int z, uint32_t);
     void set(vec3 point, uint32_t);
+
+    std::vector<ivec3> immediateFilledNeighbors(ivec3) const;
 
     void insertMesh(const SimpleMesh&, bool assignVoxelColorsToSurface);
     void fillVolumes(const std::vector<SimpleMesh>&);

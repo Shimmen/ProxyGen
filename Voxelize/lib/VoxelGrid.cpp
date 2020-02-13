@@ -29,6 +29,22 @@ ivec3 VoxelGrid::remapToGridSpace(vec3 point, float (*roundingFunc)(float)) cons
     return { x, y, z };
 }
 
+vec3 VoxelGrid::voxelCenterPoint(ivec3 gridCoord) const
+{
+    const vec3 voxelSize = (m_bounds.max - m_bounds.min) / vec3(m_sx, m_sy, m_sz); // TODO: Could & should be cached!
+    return vec3(gridCoord) * voxelSize + (0.5f * voxelSize);
+}
+
+ivec3 VoxelGrid::gridDimensions() const
+{
+    return ivec3(m_sx, m_sy, m_sz);
+}
+
+aabb3 VoxelGrid::gridBounds() const
+{
+    return m_bounds;
+}
+
 size_t VoxelGrid::numFilledVoxels() const
 {
     size_t count = 0;
@@ -41,6 +57,11 @@ size_t VoxelGrid::numFilledVoxels() const
     }
 
     return count;
+}
+
+uint64_t VoxelGrid::linearIndex(ivec3 gridIndex) const
+{
+    return linearIndex(gridIndex.x, gridIndex.y, gridIndex.z);
 }
 
 uint64_t VoxelGrid::linearIndex(int x, int y, int z) const
@@ -63,6 +84,37 @@ void VoxelGrid::set(vec3 point, uint32_t value)
 {
     ivec3 grid = remapToGridSpace(point, std::round);
     set(grid.x, grid.y, grid.z, value);
+}
+
+std::vector<ivec3> VoxelGrid::immediateFilledNeighbors(ivec3 gridCoord) const
+{
+    std::vector<ivec3> neighbors {};
+    neighbors.reserve(3 * 3 * 3 - 1);
+
+    for (int zz = -1; zz <= 1; ++zz) {
+        for (int yy = -1; yy <= 1; ++yy) {
+            for (int xx = -1; xx <= 1; ++xx) {
+
+                if (xx == 0 && yy == 0 && zz == 0) {
+                    continue;
+                }
+
+                int x = gridCoord.x + xx;
+                int y = gridCoord.y + yy;
+                int z = gridCoord.z + zz;
+
+                if (x < 0 || x >= m_sx || y < 0 || y >= m_sy || z < 0 || z >= m_sz) {
+                    continue;
+                }
+
+                if (get(x, y, z) > 0) {
+                    neighbors.emplace_back(x, y, z);
+                }
+            }
+        }
+    }
+
+    return neighbors;
 }
 
 void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurface)
