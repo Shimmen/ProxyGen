@@ -4,10 +4,11 @@ project(Voxelize)
 set(CMAKE_CXX_STANDARD 17)
 
 add_executable(Voxelize
-        src/main.cpp
+        src/voxelize.cpp
         src/Texture.cpp
         src/SimpleMesh.cpp
-        src/VoxelGrid.cpp)
+        src/VoxelGrid.cpp
+        src/GltfUtil.cpp)
 
 target_compile_options(Voxelize PRIVATE -Wall)
 target_compile_options(Voxelize PRIVATE -Wimplicit-fallthrough)

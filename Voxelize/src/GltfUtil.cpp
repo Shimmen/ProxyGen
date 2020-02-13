@@ -1,17 +1,6 @@
-#include "SimpleMesh.h"
-#include "Texture.h"
-#include "VoxelGrid.h"
-#include "mathkit.h"
-#include <fmt/format.h>
-#include <tiny_gltf.h>
-#include <vector>
+#include "GltfUtil.h"
 
-using Node = tinygltf::Node;
-using Model = tinygltf::Model;
-using Mesh = tinygltf::Mesh;
-using Primitive = tinygltf::Primitive;
-
-mat4 createMatrix(const Node& node)
+mat4 GltfUtil::createMatrixForNode(const tinygltf::Node& node)
 {
     if (!node.matrix.empty()) {
         return mathkit::linearToMat4(node.matrix);
@@ -29,7 +18,7 @@ mat4 createMatrix(const Node& node)
     }
 }
 
-std::pair<std::string, Model> loadModel(const std::string& path)
+std::pair<std::string, tinygltf::Model> GltfUtil::loadModel(const std::string& path)
 {
     int lastSlash = path.rfind('/');
     if (lastSlash == -1) {
@@ -42,7 +31,7 @@ std::pair<std::string, Model> loadModel(const std::string& path)
     std::string error;
     std::string warning;
 
-    Model model;
+    tinygltf::Model model;
     bool result = loader.LoadASCIIFromFile(&model, &error, &warning, path);
 
     if (!warning.empty()) {
@@ -65,7 +54,7 @@ std::pair<std::string, Model> loadModel(const std::string& path)
     return { basePath, model };
 }
 
-std::vector<vec3> bakedPositionData(const Model& model, const tinygltf::Primitive& primitive, mat4 matrix)
+std::vector<vec3> GltfUtil::bakedPositionData(const tinygltf::Model& model, const tinygltf::Primitive& primitive, mat4 matrix)
 {
     auto entry = primitive.attributes.find("POSITION");
     assert(entry != primitive.attributes.end());
@@ -93,7 +82,7 @@ std::vector<vec3> bakedPositionData(const Model& model, const tinygltf::Primitiv
     return bakedPositionData;
 }
 
-std::vector<vec2> texcoordData(const Model& model, const tinygltf::Primitive& primitive)
+std::vector<vec2> GltfUtil::texcoordData(const tinygltf::Model& model, const tinygltf::Primitive& primitive)
 {
     auto entry = primitive.attributes.find("TEXCOORD_0");
     assert(entry != primitive.attributes.end());
@@ -114,7 +103,7 @@ std::vector<vec2> texcoordData(const Model& model, const tinygltf::Primitive& pr
     return vec;
 }
 
-std::vector<size_t> indexData(const Model& model, const tinygltf::Primitive& primitive)
+std::vector<size_t> GltfUtil::indexData(const tinygltf::Model& model, const tinygltf::Primitive& primitive)
 {
     assert(primitive.indices != -1);
     const tinygltf::Accessor accessor = model.accessors[primitive.indices];
@@ -148,7 +137,7 @@ std::vector<size_t> indexData(const Model& model, const tinygltf::Primitive& pri
     return indexData;
 }
 
-std::string baseColorTextureURI(const Model& model, const Primitive& primitive)
+std::string GltfUtil::baseColorTextureURI(const tinygltf::Model& model, const tinygltf::Primitive& primitive)
 {
     assert(primitive.material != -1);
     auto& material = model.materials[primitive.material];
@@ -161,10 +150,10 @@ std::string baseColorTextureURI(const Model& model, const Primitive& primitive)
     return image.uri;
 }
 
-void bakeDownMesh(const Model& model, const std::string& basePath, std::vector<SimpleMesh>& simpleMeshes)
+void GltfUtil::bakeDownModelToSimpleMeshes(const tinygltf::Model& model, const std::string& basePath, std::vector<SimpleMesh>& simpleMeshes)
 {
-    std::function<void(const Node&, mat4)> findMeshesRecursively = [&](const Node& node, mat4 matrix) {
-        matrix = createMatrix(node) * matrix;
+    std::function<void(const tinygltf::Node&, mat4)> findMeshesRecursively = [&](const tinygltf::Node& node, mat4 matrix) {
+        matrix = createMatrixForNode(node) * matrix;
 
         if (node.mesh != -1) {
             auto& mesh = model.meshes[node.mesh];
@@ -187,56 +176,6 @@ void bakeDownMesh(const Model& model, const std::string& basePath, std::vector<S
 
     for (int nodeIdx : scene.nodes) {
         auto& node = model.nodes[nodeIdx];
-        findMeshesRecursively(node, createMatrix(node));
+        findMeshesRecursively(node, createMatrixForNode(node));
     }
-}
-
-aabb3 calculateMeshBounds(std::vector<SimpleMesh>& meshes)
-{
-    vec3 aabbMin;
-    vec3 aabbMax;
-
-    for (auto& mesh : meshes) {
-        mesh.extendAABB(aabbMin, aabbMax);
-    }
-
-    return { aabbMin, aabbMax };
-}
-
-int main()
-{
-    // TODO: Take these as command line parameters!
-#if 0
-    std::string path = "../assets/Avocado/Avocado.gltf";
-    std::string outfile = "../assets/Avocado.vox";
-#else
-    std::string path = "../assets/BoomBox/BoomBoxWithAxes.gltf";
-    std::string outfile = "../assets/BoomBox.vox";
-#endif
-    size_t gridDimensions = 126;
-
-    auto [basePath, model] = loadModel(path);
-
-    std::vector<SimpleMesh> simpleMeshes {};
-    bakeDownMesh(model, basePath, simpleMeshes);
-
-    aabb3 boundsOfAllMeshes = calculateMeshBounds(simpleMeshes);
-    VoxelGrid grid { glm::ivec3(gridDimensions), boundsOfAllMeshes };
-
-    fmt::print("= voxelization begin =\n");
-    for (size_t i = 0; i < simpleMeshes.size(); ++i) {
-        fmt::print("   mesh {}/{}\n", i + 1, simpleMeshes.size());
-        grid.insertMesh(simpleMeshes[i], true);
-    }
-    fmt::print("= voxelization done  =\n");
-
-    fmt::print("= color quantization begin =\n");
-    grid.quantizeColors(200);
-    fmt::print("= color quantization done  =\n");
-
-    fmt::print("= volume filling begin =\n");
-    grid.fillVolumes(simpleMeshes);
-    fmt::print("= volume filling done  =\n");
-
-    grid.writeToVox(outfile);
 }

@@ -20,6 +20,8 @@ public:
 
     void extendAABB(vec3& min, vec3& max) const;
 
+    static aabb3 calculateBounds(std::vector<SimpleMesh>& meshes);
+
 private:
     std::vector<vec3> m_positions;
     std::vector<vec2> m_texcoords;

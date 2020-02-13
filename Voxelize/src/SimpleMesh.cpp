@@ -67,3 +67,15 @@ void SimpleMesh::extendAABB(vec3& min, vec3& max) const
         max.z = std::max(max.z, point.z);
     }
 }
+
+aabb3 SimpleMesh::calculateBounds(std::vector<SimpleMesh>& meshes)
+{
+    vec3 aabbMin;
+    vec3 aabbMax;
+
+    for (auto& mesh : meshes) {
+        mesh.extendAABB(aabbMin, aabbMax);
+    }
+
+    return { aabbMin, aabbMax };
+}
