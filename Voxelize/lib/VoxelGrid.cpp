@@ -31,8 +31,8 @@ ivec3 VoxelGrid::remapToGridSpace(vec3 point, float (*roundingFunc)(float)) cons
 
 vec3 VoxelGrid::voxelCenterPoint(ivec3 gridCoord) const
 {
-    const vec3 voxelSize = (m_bounds.max - m_bounds.min) / vec3(m_sx, m_sy, m_sz); // TODO: Could & should be cached!
-    return vec3(gridCoord) * voxelSize + (0.5f * voxelSize);
+    const vec3 voxSize = voxelSize();
+    return vec3(gridCoord) * voxSize + (0.5f * voxSize);
 }
 
 ivec3 VoxelGrid::gridDimensions() const
@@ -43,6 +43,11 @@ ivec3 VoxelGrid::gridDimensions() const
 aabb3 VoxelGrid::gridBounds() const
 {
     return m_bounds;
+}
+
+vec3 VoxelGrid::voxelSize() const
+{
+    return (m_bounds.max - m_bounds.min) / vec3(m_sx, m_sy, m_sz);
 }
 
 size_t VoxelGrid::numFilledVoxels() const
@@ -73,6 +78,11 @@ uint64_t VoxelGrid::linearIndex(int x, int y, int z) const
 uint32_t VoxelGrid::get(int x, int y, int z) const
 {
     return m_grid[linearIndex(x, y, z)];
+}
+
+uint32_t VoxelGrid::get(ivec3 coord) const
+{
+    return get(coord.x, coord.y, coord.z);
 }
 
 void VoxelGrid::set(int x, int y, int z, uint32_t value)

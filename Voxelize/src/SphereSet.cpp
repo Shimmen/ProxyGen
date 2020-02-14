@@ -41,7 +41,7 @@ SphereSet preprocess(const VoxelGrid& filledGrid, int numSpheres)
         float z = uniformInGridZ(generator);
 
         ivec3 gridCoord = filledGrid.remapToGridSpace({ x, y, z }, std::round);
-        if (filledGrid.get(gridCoord.x, gridCoord.y, gridCoord.z) > 0) {
+        if (filledGrid.get(gridCoord) > 0) {
             Sphere sphere { vec3(x, y, z), 0.0f };
             sphereSet.spheres.push_back(sphere);
             sphereSet.currentSov.push_back(0.0f);
@@ -51,14 +51,54 @@ SphereSet preprocess(const VoxelGrid& filledGrid, int numSpheres)
     return sphereSet;
 }
 
-float sphereVolume(float r)
-{
-    return (4.0f / 3.0f) * mathkit::PI * (r * r * r);
-}
-
 float sphereOutsideVolumeUsingVoxels(const Sphere& sphere, const VoxelGrid& grid)
 {
-    // TODO: Will it be enough to use voxels?
+    // TODO: Is there enough precision when using voxels?
+
+    if (sphere.radius < 1e-6f) {
+        return 0.0f;
+    }
+
+    // TODO: It's (very?) important that we don't have holes in the filled grid now..
+    int numOutsideVoxels = 0;
+
+    vec3 voxelSize = grid.voxelSize();
+    vec3 first = sphere.origin - vec3(sphere.radius) - (0.05f * voxelSize);
+    vec3 last = sphere.origin + vec3(sphere.radius) + (0.05f * voxelSize);
+
+    first = max(first, grid.gridBounds().min);
+    last = min(last, grid.gridBounds().max);
+
+    for (float z = first.z; z <= last.z; z += voxelSize.z) { // NOLINT(cert-flp30-c)
+        for (float y = first.y; y <= last.y; y += voxelSize.y) { // NOLINT(cert-flp30-c)
+            for (float x = first.x; x <= last.x; x += voxelSize.x) { // NOLINT(cert-flp30-c)
+
+                vec3 samplePoint = vec3(x, y, z);
+
+                // Only count voxels that actually are inside the sphere
+                if (distance2(sphere.origin, samplePoint) > sphere.radius * sphere.radius) {
+                    continue;
+                }
+
+                ivec3 gridSampleCoord = grid.remapToGridSpace(samplePoint, std::round);
+
+                // NOTE: Should be handled by the coord clamping above this loop
+                //if (any(lessThan(gridSampleCoord, ivec3(0))) || any(greaterThanEqual(gridSampleCoord, grid.gridDimensions()))) {
+                //    continue;
+                //}
+
+                // If this voxel (which is considered to be inside the sphere) is empty, we assume that the voxel
+                // is actually outside the mesh (since the grid should be filled), and so we count this voxel.
+                uint32_t value = grid.get(gridSampleCoord);
+                if (value == 0) {
+                    numOutsideVoxels += 1;
+                }
+            }
+        }
+    }
+
+    float sov = float(numOutsideVoxels) * (voxelSize.x * voxelSize.y * voxelSize.z);
+    return sov;
 }
 
 float totalSphereOutsideVolumeUsingVoxels(const SphereSet& set, const VoxelGrid& grid)
@@ -81,6 +121,7 @@ PointAssignmentResult pointAssignment(SphereSet& set)
     //  See p. 5 in the paper for more information. It's already slow and the SOV function is just a stub!
 
     const VoxelGrid& grid = *set.filledGrid;
+    size_t numFilledVoxels = grid.numFilledVoxels();
 
     struct PointRef {
         PointRef(vec3 p, ivec3 c)
@@ -93,16 +134,24 @@ PointAssignmentResult pointAssignment(SphereSet& set)
     };
 
     std::unordered_set<uint64_t> visitedPoints {};
+    visitedPoints.reserve(numFilledVoxels);
+
     std::vector<PointRef> stack {};
 
     for (auto& [sphereCenter, _] : set.spheres) {
         ivec3 gridIndex = grid.remapToGridSpace(sphereCenter, std::round);
         PointRef pointRef { sphereCenter, gridIndex };
         stack.push_back(pointRef);
+
+        uint64_t linearIndex = grid.linearIndex(gridIndex);
+        visitedPoints.insert(linearIndex);
     }
 
     auto oldSpheres = set.spheres;
+    auto oldSphereSov = set.currentSov;
     set.currentTotalSov = totalSphereOutsideVolumeUsingVoxels(set, grid);
+
+    int numAssigned = 0;
 
     while (!stack.empty()) {
         PointRef pointRef = stack.back();
@@ -135,11 +184,7 @@ PointAssignmentResult pointAssignment(SphereSet& set)
             }
         }
 
-        // Mark point as visited
-        uint64_t linearIndex = grid.linearIndex(pointRef.gridIndex);
-        visitedPoints.insert(linearIndex);
-
-        // Expand the best sphere to contain 'point'
+        // Expand the best sphere to contain the new point
         assert(bestSphereIdx != -1);
         set.spheres[bestSphereIdx].radius = newPotentialRadius;
         set.currentSov[bestSphereIdx] = newPotentialSov;
@@ -155,6 +200,17 @@ PointAssignmentResult pointAssignment(SphereSet& set)
 
             vec3 voxelCenter = grid.voxelCenterPoint(gridCoord);
             stack.emplace_back(voxelCenter, gridCoord);
+
+            uint64_t linearIndex = grid.linearIndex(gridCoord);
+            visitedPoints.insert(linearIndex);
+
+            assert(stack.size() <= numFilledVoxels);
+        }
+
+        numAssigned += 1;
+
+        if (numAssigned % 100 == 0 || numAssigned == numFilledVoxels) {
+            fmt::print("     assigned {}/{} points ({:.1f}%)\n", numAssigned, numFilledVoxels, 100.0f * float(numAssigned) / float(numFilledVoxels));
         }
     }
 
@@ -167,6 +223,7 @@ PointAssignmentResult pointAssignment(SphereSet& set)
     } else {
         // Failure, rollback the changes & trigger sphere teleportation
         set.spheres = oldSpheres;
+        set.currentSov = oldSphereSov;
         return PointAssignmentResult::PerformSphereTeleportation;
     }
 }
@@ -188,7 +245,7 @@ int main()
     std::string path = "../assets/Avocado/Avocado.gltf";
     //std::string path = "../assets/BoomBox/BoomBoxWithAxes.gltf";
 
-    const size_t gridDimensions = 126;
+    const size_t gridDimensions = 16;
     std::vector<SimpleMesh> simpleMeshes {};
 
     fmt::print("=> loading model '{}'\n", path);

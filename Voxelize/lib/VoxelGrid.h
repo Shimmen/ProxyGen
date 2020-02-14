@@ -14,6 +14,7 @@ public:
 
     ivec3 gridDimensions() const;
     aabb3 gridBounds() const;
+    vec3 voxelSize() const;
 
     [[nodiscard]] size_t numFilledVoxels() const;
 
@@ -21,6 +22,7 @@ public:
     [[nodiscard]] uint64_t linearIndex(int x, int y, int z) const;
 
     [[nodiscard]] uint32_t get(int x, int y, int z) const;
+    [[nodiscard]] uint32_t get(ivec3) const;
     void set(int x, int y, int z, uint32_t);
     void set(vec3 point, uint32_t);
 
