@@ -153,6 +153,8 @@ PointAssignmentResult pointAssignment(SphereSet& set)
 
     int numAssigned = 0;
 
+    // TODO: OpenMP would be nice here! Just make sure to mark some critical sections! However, it seems like the rounding of
+    //  coordinates (std::roundf) is the main contributor of self-time according to the profiler. Worth looking into omp anyway!
     while (!stack.empty()) {
         PointRef pointRef = stack.back();
         stack.pop_back();
