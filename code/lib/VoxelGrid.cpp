@@ -64,6 +64,40 @@ size_t VoxelGrid::numFilledVoxels() const
     return count;
 }
 
+std::vector<vec3> VoxelGrid::filledVoxelsInSphere(const Sphere& sphere) const
+{
+    std::vector<vec3> voxels {};
+
+    vec3 voxSize = voxelSize();
+    vec3 first = sphere.origin - vec3(sphere.radius) - (0.05f * voxSize);
+    vec3 last = sphere.origin + vec3(sphere.radius) + (0.05f * voxSize);
+
+    first = max(first, m_bounds.min);
+    last = min(last, m_bounds.max);
+
+    for (float z = first.z; z <= last.z; z += voxSize.z) { // NOLINT(cert-flp30-c)
+        for (float y = first.y; y <= last.y; y += voxSize.y) { // NOLINT(cert-flp30-c)
+            for (float x = first.x; x <= last.x; x += voxSize.x) { // NOLINT(cert-flp30-c)
+
+                vec3 samplePoint = vec3(x, y, z);
+
+                // Only count voxels that actually are inside the sphere
+                if (distance2(sphere.origin, samplePoint) > sphere.radius * sphere.radius) {
+                    continue;
+                }
+
+                ivec3 gridSampleCoord = remapToGridSpace(samplePoint, std::round);
+
+                if (get(gridSampleCoord) > 0) {
+                    voxels.emplace_back(samplePoint);
+                }
+            }
+        }
+    }
+
+    return voxels;
+}
+
 uint64_t VoxelGrid::linearIndex(ivec3 gridIndex) const
 {
     return linearIndex(gridIndex.x, gridIndex.y, gridIndex.z);

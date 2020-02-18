@@ -49,6 +49,11 @@ constexpr float radians(float degrees)
     return degrees / 180.0f * PI;
 }
 
+constexpr float square(float x)
+{
+    return x * x;
+}
+
 inline float clamp(float val, float minVal, float maxVal)
 {
     return glm::clamp(val, minVal, maxVal);

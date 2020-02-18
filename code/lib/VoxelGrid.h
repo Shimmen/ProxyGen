@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SimpleMesh.h"
+#include "Sphere.h"
 #include "mathkit.h"
 #include <unordered_map>
 #include <vector>
@@ -17,6 +18,7 @@ public:
     vec3 voxelSize() const;
 
     [[nodiscard]] size_t numFilledVoxels() const;
+    [[nodiscard]] std::vector<vec3> filledVoxelsInSphere(const Sphere& sphere) const;
 
     [[nodiscard]] uint64_t linearIndex(ivec3 gridIndex) const;
     [[nodiscard]] uint64_t linearIndex(int x, int y, int z) const;
