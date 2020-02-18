@@ -17,4 +17,5 @@ target_compile_options(Voxelize PRIVATE ${PROXYGEN_WARNINGS})
 
 add_executable(SphereSet src/SphereSet.cpp)
 target_link_libraries(SphereSet PRIVATE ProxyGenLib)
+target_link_libraries(SphereSet PRIVATE bobyqa)
 target_compile_options(SphereSet PRIVATE ${PROXYGEN_WARNINGS})

@@ -3,6 +3,7 @@
 #include "Sphere.h"
 #include "VoxelGrid.h"
 #include "mathkit.h"
+#include <bobyqa.h>
 #include <fmt/format.h>
 #include <random>
 #include <unordered_set>
@@ -223,9 +224,7 @@ float pointAssignment(SphereSet& set, float previousError)
 void sphereFitting(SphereSet& set)
 {
     fmt::print("TODO: Implement sphere fitting!\n");
-    // TODO:
-    //  - Probably make use of https://github.com/emmt/Algorithms/tree/master/bobyqa
-    //    or some other of these (https://github.com/emmt/Algorithms) algorithms
+    bobyqa_test();
 }
 
 float sphereOverlap(const Sphere& a, const Sphere& b)
