@@ -233,13 +233,22 @@ PointAssignmentResult pointAssignment(SphereSet& set)
 void sphereFitting(SphereSet& set)
 {
     fmt::print("TODO: Implement sphere fitting!\n");
-    // TODO!
+    // TODO:
+    //  - Probably make use of https://github.com/emmt/Algorithms/tree/master/bobyqa
+    //    or some other of these (https://github.com/emmt/Algorithms) algorithms
 }
 
 void sphereTeleportation(SphereSet& set)
 {
     fmt::print("TODO: Implement sphere teleportation!\n");
-    // TODO!
+    // TODO:
+    //  1. Find the sphere which is most overlapped by the other spheres
+    //     (https://math.stackexchange.com/questions/297751/overlapping-spheres)
+    //  2. Find the sphere with highest SOV value
+    //  3. Remove the most overlapped sphere
+    //  4. Split the highest SOV sphere into two, with new sphere centers being
+    //     the two points furthest away from each other in the initial sphere.
+    //  5. Recalculate total SOV, if better, good, if worse the whole proxy gen is complete
 }
 
 int main()
