@@ -221,10 +221,112 @@ float pointAssignment(SphereSet& set, float previousError)
     }
 }
 
+REAL sphereFittingObjectiveFunction(const INTEGER n, const REAL* x, void* data)
+{
+    // TODO: Implement the real objective function here!
+
+    INTEGER i;
+    REAL f, temp, tempa, tempb;
+
+    f = 0.0;
+    for (i = 4; i <= n; i += 2) {
+        INTEGER j, j1 = i - 2;
+        for (j = 2; j <= j1; j += 2) {
+            tempa = x[i - 2] - x[j - 2];
+            tempb = x[i - 1] - x[j - 1];
+            temp = tempa * tempa + tempb * tempb;
+            temp = std::max(temp, 1e-6);
+            f += 1.0 / std::sqrt(temp);
+        }
+    }
+    return f;
+}
+
 void sphereFitting(SphereSet& set)
 {
-    fmt::print("TODO: Implement sphere fitting!\n");
-    bobyqa_test();
+    for (auto& sphere : set.spheres) {
+
+        assert(sphere.radius > 0.0f);
+
+        // Origin (3) + radius (1)
+        constexpr INTEGER n = 3 + 1;
+
+        // NPT is the number of interpolation conditions.  Its value must be in the interval
+        // [N+2,(N+1)(N+2)/2].  Choices that exceed 2*N+1 are not recommended.
+        constexpr INTEGER npt = n + 2; // TODO: Find a good value!
+
+        REAL x[n] = {
+            sphere.origin.x,
+            sphere.origin.y,
+            sphere.origin.z,
+            sphere.radius
+        };
+
+        // TODO: Find good values!
+        REAL xLower[n] = {
+            x[0] - sphere.radius,
+            x[1] - sphere.radius,
+            x[2] - sphere.radius,
+            0.0
+        };
+
+        // TODO: Find good values!
+        REAL xUpper[n] = {
+            x[0] + sphere.radius,
+            x[1] + sphere.radius,
+            x[2] + sphere.radius,
+            // (definitely shouldn't need to go higher than 10x current radius)
+            sphere.radius * 10.0
+        };
+
+        // Typically, RHOBEG should be about one tenth of the greatest expected change to a variable
+        // (and we probably should never need to move outside the current sphere with either the
+        //  origin point or the radius.)
+        // TODO: Find good value!
+        REAL rhoBeg = sphere.radius / 10.0;
+
+        // RHOEND should indicate the accuracy that is required in the final values of the variables
+        // NOTE: Some models are tiny, others are huge.. So an absolute/constant accuracy is probably
+        //  not very helpful here. A fraction of the sphere radius could maybe work as a scale-aware metric?
+        // TODO: Find good value!
+        REAL rhoEnd = sphere.radius / 100.0;
+
+        //The array W will be used for working space.  Its length must be at least
+        // (NPT+5)*(NPT+N)+3*N*(N+5)/2.  Upon successful return, the first element of W
+        // will be set to the function value at the solution. */
+        REAL workingMemory[(npt + 5) * (npt + n) + 3 * n * (n + 5) / 2];
+
+        INTEGER logLevel = 2;
+        INTEGER maxObjFunCalls = 100;
+
+        int status = bobyqa(n, npt, sphereFittingObjectiveFunction, nullptr,
+            x, xLower, xUpper, rhoBeg, rhoEnd,
+            logLevel, maxObjFunCalls, workingMemory);
+
+        switch (status) {
+        case BOBYQA_SUCCESS:
+            // algorithm converged!
+            return;
+        case BOBYQA_BAD_NPT:
+            fmt::print("bobyqa error: NPT is not in the required interval\n");
+            assert(false); // npt is hardcoded to a valid value!
+            break;
+        case BOBYQA_TOO_CLOSE:
+            fmt::print("bobyqa error: insufficient space between the bounds\n");
+            break;
+        case BOBYQA_ROUNDING_ERRORS:
+            fmt::print("bobyqa error: too much cancellation in a denominator\n");
+            break;
+        case BOBYQA_TOO_MANY_EVALUATIONS:
+            fmt::print("bobyqa error: maximum number of function evaluations exceeded\n");
+            break;
+        case BOBYQA_STEP_FAILED:
+            fmt::print("bobyqa error: a trust region step has failed to reduce Q\n");
+            break;
+        default:
+            assert(false);
+        }
+    }
 }
 
 float sphereOverlap(const Sphere& a, const Sphere& b)
