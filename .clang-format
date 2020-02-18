@@ -1,4 +1,0 @@
----
-BasedOnStyle: WebKit
-Language: Cpp
-SpaceAfterTemplateKeyword: false
