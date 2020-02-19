@@ -1,6 +1,7 @@
 #include "VoxelGrid.h"
 
 #include "tribox3.h"
+#include <algorithm>
 #include <fmt/format.h>
 #include <fstream>
 #include <sstream>
@@ -12,7 +13,7 @@ VoxelGrid::VoxelGrid(glm::ivec3 size, aabb3 bounds)
     , m_sz(size.z)
 {
     size_t totalSize = size.x * size.y * size.z;
-    assert(totalSize < 4ul * 1024ul * 1024ul * 1024ul);
+    assert(totalSize < 4ull * 1024ull * 1024ull * 1024ull);
 
     // note: this will allocate the whole dense grid
     m_grid.resize(totalSize);
@@ -391,9 +392,9 @@ void VoxelGrid::writeToVox(const std::string& path) const
         stream << content;
     };
 
-    int32_t sx = std::min(m_sx, 126ul);
-    int32_t sy = std::min(m_sy, 126ul);
-    int32_t sz = std::min(m_sz, 126ul);
+    int32_t sx = std::min(m_sx, 126ull);
+    int32_t sy = std::min(m_sy, 126ull);
+    int32_t sz = std::min(m_sz, 126ull);
 
     std::ostringstream sizeBuffer {};
     writeInt32(sizeBuffer, sx);

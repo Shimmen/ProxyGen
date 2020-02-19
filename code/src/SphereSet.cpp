@@ -4,6 +4,7 @@
 #include "VoxelGrid.h"
 #include "mathkit.h"
 #include <bobyqa.h>
+#include <direct.h>
 #include <fmt/format.h>
 #include <random>
 #include <unordered_set>
@@ -279,9 +280,8 @@ void sphereFitting(SphereSet& set)
             sphere.radius * 10.0
         };
 
-        // Typically, RHOBEG should be about one tenth of the greatest expected change to a variable
-        // (and we probably should never need to move outside the current sphere with either the
-        //  origin point or the radius.)
+        // "Typically, RHOBEG should be about one tenth of the greatest expected change to a variable"
+        // (and we probably should never need to move "outside" the current sphere with either the origin point or the radius.)
         // TODO: Find good value!
         REAL rhoBeg = sphere.radius / 10.0;
 
@@ -423,10 +423,23 @@ void sphereTeleportation(SphereSet& set)
     assert(maxDistance2 > 1e-6f);
 }
 
-int main()
+void setApplicationWorkingDirectory(char* executableName, const std::string& workingDir)
 {
-    std::string path = "../assets/Avocado/Avocado.gltf";
-    //std::string path = "../assets/BoomBox/BoomBoxWithAxes.gltf";
+    char fullPathBuf[_MAX_PATH] = {};
+    assert(_fullpath(fullPathBuf, executableName, sizeof(fullPathBuf)));
+    std::string fullPath { fullPathBuf };
+
+    size_t startOfWorkingDirName = fullPath.find(workingDir);
+    std::string newWorkingDir = fullPath.substr(0, startOfWorkingDirName + workingDir.length() + 1);
+    assert(_chdir(newWorkingDir.c_str()) == 0);
+}
+
+int main(int argc, char** argv)
+{
+    setApplicationWorkingDirectory(argv[0], "ProxyGen");
+
+    std::string path = "assets/Avocado/Avocado.gltf";
+    //std::string path = "assets/BoomBox/BoomBoxWithAxes.gltf";
 
     constexpr int numSpheres = 32;
     const size_t gridDimensions = 16;

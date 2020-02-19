@@ -1,5 +1,7 @@
 #include "SimpleMesh.h"
 
+#include <algorithm>
+
 SimpleMesh::SimpleMesh(std::vector<vec3>&& positions, std::vector<vec2>&& texcoords, std::vector<size_t>&& indices, const std::string& texturePath)
     : m_positions(positions)
     , m_texcoords(texcoords)
@@ -70,8 +72,12 @@ void SimpleMesh::extendAABB(vec3& min, vec3& max) const
 
 aabb3 SimpleMesh::calculateBounds(std::vector<SimpleMesh>& meshes)
 {
-    vec3 aabbMin;
-    vec3 aabbMax;
+    if (meshes.empty()) {
+        return { vec3(-INFINITY), vec3(+INFINITY) };
+    }
+
+    vec3 aabbMin { +INFINITY };
+    vec3 aabbMax { -INFINITY };
 
     for (auto& mesh : meshes) {
         mesh.extendAABB(aabbMin, aabbMax);

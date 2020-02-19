@@ -3,10 +3,12 @@ project(ProxyGen)
 
 set(CMAKE_CXX_STANDARD 17)
 
-set(PROXYGEN_WARNINGS
+if(NOT MSVC)
+    set(PROXYGEN_WARNINGS
         -Wall
         -Wpedantic
         -Wimplicit-fallthrough)
+endif()
 
 add_subdirectory(deps/)
 add_subdirectory(lib/)

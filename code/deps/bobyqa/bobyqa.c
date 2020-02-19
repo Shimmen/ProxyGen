@@ -20,6 +20,9 @@
  * Read the accompanying `LICENSE` file for details.
  */
 
+/* [ADDED BY SIMON MOOS] On some platforms (e.g. on VC++) this is needed to get M_PI and M_SQRT2*/
+#define _USE_MATH_DEFINES
+
 #include <math.h>
 #include <stdio.h>
 
