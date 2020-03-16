@@ -164,7 +164,12 @@ void GltfUtil::bakeDownModelToSimpleMeshes(const tinygltf::Model& model, const s
             auto& mesh = model.meshes[node.mesh];
             for (auto& primitive : mesh.primitives) {
                 assert(primitive.mode == TINYGLTF_MODE_TRIANGLES);
-                std::string texturePath = basePath + baseColorTextureURI(model, primitive);
+
+                std::optional<std::string> texturePath {};
+                std::string path = baseColorTextureURI(model, primitive);
+                if (path != "") {
+                    texturePath = basePath + path;
+                } 
                 simpleMeshes.emplace_back(bakedPositionData(model, primitive, matrix), texcoordData(model, primitive), indexData(model, primitive), texturePath);
             }
         }

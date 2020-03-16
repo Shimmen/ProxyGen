@@ -215,7 +215,11 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurfa
                             mesh.triangleTexcoords(ti, uv0, uv1, uv2);
 
                             vec2 uv = alpha * uv0 + beta * uv1 + gamma * uv2;
-                            vec3 color = mesh.texture().sample(uv);
+                            
+                            vec3 color = vec3(1, 0, 1);
+                            if (mesh.hasTexture()) {
+                                color = mesh.texture().sample(uv);
+                            }
 
                             value = m_colors.size() + 1;
                             m_colors.push_back(color);

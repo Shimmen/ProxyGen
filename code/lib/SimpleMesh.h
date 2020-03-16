@@ -2,12 +2,14 @@
 
 #include "Texture.h"
 #include "mathkit.h"
+#include <optional>
 #include <vector>
 
 class SimpleMesh {
 public:
-    SimpleMesh(std::vector<vec3>&& positions, std::vector<vec2>&& texcoords, std::vector<size_t>&& indices, const std::string& texturePath);
+    SimpleMesh(std::vector<vec3>&& positions, std::vector<vec2>&& texcoords, std::vector<size_t>&& indices, std::optional<std::string> texturePath);
 
+    [[nodiscard]] bool hasTexture() const;
     [[nodiscard]] const Texture& texture() const;
     [[nodiscard]] size_t vertexCount() const;
 
@@ -26,5 +28,5 @@ private:
     std::vector<vec3> m_positions;
     std::vector<vec2> m_texcoords;
     std::vector<size_t> m_indices;
-    Texture m_texture;
+    std::optional<Texture> m_texture;
 };
