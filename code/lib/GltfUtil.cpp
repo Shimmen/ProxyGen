@@ -142,11 +142,16 @@ std::string GltfUtil::baseColorTextureURI(const tinygltf::Model& model, const ti
     assert(primitive.material != -1);
     auto& material = model.materials[primitive.material];
     int texIndex = material.pbrMetallicRoughness.baseColorTexture.index;
-    assert(texIndex != -1);
+    if (texIndex == -1) {
+        return "";
+    }
+
     auto& texture = model.textures[texIndex];
     assert(texture.source != -1);
     auto& image = model.images[texture.source];
-    assert(!image.uri.empty());
+    if (image.uri.empty()) {
+        return "";
+    }
     return image.uri;
 }
 
