@@ -247,7 +247,9 @@ void sphereFitting(SphereSet& set)
 {
     for (auto& sphere : set.spheres) {
 
-        assert(sphere.radius > 0.0f);
+        if (sphere.radius <= 0.0f) {
+            continue;
+        }
 
         // Origin (3) + radius (1)
         constexpr INTEGER n = 3 + 1;
@@ -300,8 +302,8 @@ void sphereFitting(SphereSet& set)
         INTEGER maxObjFunCalls = 100;
 
         int status = bobyqa(n, npt, sphereFittingObjectiveFunction, nullptr,
-            x, xLower, xUpper, rhoBeg, rhoEnd,
-            logLevel, maxObjFunCalls, workingMemory);
+                            x, xLower, xUpper, rhoBeg, rhoEnd,
+                            logLevel, maxObjFunCalls, workingMemory);
 
         switch (status) {
         case BOBYQA_SUCCESS:
@@ -404,23 +406,30 @@ void sphereTeleportation(SphereSet& set)
     Sphere& sphereToSplit = set.spheres[maxSovIdx];
     Sphere& sphereToRemove = set.spheres[maxOverlapRatioIdx];
 
-    float maxDistance2 = 0.0f;
-
     const auto& splitCandidates = set.filledGrid->filledVoxelsInSphere(sphereToSplit);
-    for (size_t i = 0, len = splitCandidates.size(); i < len; ++i) {
-        const vec3& a = splitCandidates[i];
-        for (size_t k = i + 1; k < len; ++k) {
-            const vec3& b = splitCandidates[k];
-            float dist2 = distance2(a, b);
-            if (dist2 > maxDistance2) {
-                maxDistance2 = dist2;
-                sphereToSplit.origin = a;
-                sphereToRemove.origin = b;
+    assert(!splitCandidates.empty());
+
+    if (splitCandidates.size() == 1) {
+        // Only one voxel, so pick two two corners of the voxel
+        sphereToSplit.origin = splitCandidates[0] - 0.5f * set.filledGrid->voxelSize();
+        sphereToRemove.origin = splitCandidates[0] + 0.5f * set.filledGrid->voxelSize();
+    } else {
+        float maxDistance2 = 0.0f;
+        for (size_t i = 0, len = splitCandidates.size(); i < len; ++i) {
+            const vec3& a = splitCandidates[i];
+            for (size_t k = i + 1; k < len; ++k) {
+                const vec3& b = splitCandidates[k];
+                float dist2 = distance2(a, b);
+                if (dist2 > maxDistance2) {
+                    maxDistance2 = dist2;
+                    sphereToSplit.origin = a;
+                    sphereToRemove.origin = b;
+                }
             }
         }
-    }
 
-    assert(maxDistance2 > 1e-6f);
+        assert(maxDistance2 > 1e-6f);
+    }
 }
 
 void setApplicationWorkingDirectory(char* executableName, const std::string& workingDir)
@@ -438,11 +447,12 @@ int main(int argc, char** argv)
 {
     setApplicationWorkingDirectory(argv[0], "ProxyGen");
 
-    std::string path = "assets/Avocado/Avocado.gltf";
+    std::string path = "assets/Bunny/bunny.gltf";
+    //std::string path = "assets/Avocado/Avocado.gltf";
     //std::string path = "assets/BoomBox/BoomBoxWithAxes.gltf";
 
-    constexpr int numSpheres = 32;
-    const size_t gridDimensions = 16;
+    constexpr int numSpheres = 16;
+    const size_t gridDimensions = 32;
 
     std::vector<SimpleMesh> simpleMeshes {};
 
@@ -494,7 +504,7 @@ int main(int argc, char** argv)
 
         if (didJustTeleport) {
             didJustTeleport = false;
-            if (newError > previousError) {
+            if (newError >= previousError) {
                 // "if [teleportation] fails to decrease error, the algorithm terminates"
                 fmt::print("==> teleportation failed to decrease error\n");
                 break;
@@ -518,4 +528,15 @@ int main(int argc, char** argv)
     }
 
     fmt::print("=> optimizing done\n");
+
+    fmt::print("=> generating sphere output\n");
+
+    fmt::print("const vec4 spheres[] = vec4[](\n");
+    for (size_t i = 0; i < numSpheres; ++i) {
+        const Sphere& sphere = sphereSet.spheres[i];
+        fmt::print("\tvec4({}, {}, {}, {}){}\n",
+                   sphere.origin.x, sphere.origin.y, sphere.origin.z,
+                   sphere.radius, (i + 1 == numSpheres) ? "" : ",");
+    }
+    fmt::print(");\n");
 }
