@@ -4,17 +4,23 @@
 #include "VoxelGrid.h"
 #include "mathkit.h"
 #include <bobyqa.h>
-#include <direct.h>
 #include <fmt/format.h>
 #include <random>
 #include <unordered_set>
 #include <vector>
+
+#ifdef WIN32
+#include <direct.h>
+#else
+#include <unistd.h>
+#endif
 
 struct SphereSet {
     std::vector<Sphere> spheres;
     std::vector<float> currentSov;
 
     const VoxelGrid* filledGrid;
+    std::vector<SimpleMesh> meshes;
 };
 
 SphereSet preprocess(const VoxelGrid& filledGrid, int numSpheres)
@@ -48,6 +54,298 @@ SphereSet preprocess(const VoxelGrid& filledGrid, int numSpheres)
     return sphereSet;
 }
 
+float solidAngleOfTriangleOnSphere(const Sphere& sphere, const vec3& v0, const vec3& v1, const vec3& v2)
+{
+    // See https://en.wikipedia.org/wiki/Solid_angle#Tetrahedron for information
+
+    // Correct? Yes, I think so..
+    vec3 va = v0 - sphere.origin;
+    vec3 vb = v1 - sphere.origin;
+    vec3 vc = v2 - sphere.origin;
+
+    float a = length(va);
+    float b = length(vb);
+    float c = length(vc);
+
+    float numerator = abs(dot(va, cross(vb, vc)));
+    float denomenator = a*b*c + dot(va, vb) * c + dot(va, vc) * b + dot(vb, vc) * a;
+
+    float tanHalfOmega = numerator / denomenator;
+    float halfOmega = atan(tanHalfOmega);
+    if (denomenator < 0.0f) {
+        halfOmega += mathkit::PI;
+    }
+
+    float omega = 2.0f * halfOmega;
+    return omega;
+}
+
+bool solveQuadratic(const float &a, const float &b, const float &c, float &x0, float &x1)
+{
+    float discr = b * b - 4 * a * c;
+    if (discr < 0) return false;
+    else if (discr == 0) x0 = x1 = - 0.5 * b / a;
+    else {
+        float q = (b > 0)
+            ? -0.5 * (b + sqrt(discr))
+            : -0.5 * (b - sqrt(discr));
+        x0 = q / a;
+        x1 = c / q;
+    }
+    if (x0 > x1) std::swap(x0, x1);
+
+    return true;
+}
+
+std::optional<vec3> lineSegmentSphereIntersectionALT(const Sphere& sphere, const vec3& x1, const vec3& x2)
+{
+    // Consider the line segment as a ray with a max length
+    vec3 origin = x1;
+    vec3 dir = x2 - x1;
+    float maxDist = length(dir);
+    dir /= maxDist;
+
+    vec3 L = origin - sphere.origin;
+    float a = dot(dir, dir);
+    float b = 2.0f * dot(dir, L);
+    float c = dot(L, L) - mathkit::square(sphere.radius);
+
+    float t0, t1;
+    if (!solveQuadratic(a, b, c, t0, t1)) {
+        return {};
+    }
+
+    if (t0 > t1) {
+        std::swap(t0, t1);
+    }
+
+    if (t0 < 0.0f) {
+        t0 = t1; // if t0 is negative, let's use t1 instead
+        if (t0 < 0) {
+            // both t0 and t1 are negative
+            return {};
+        }
+    }
+
+    float t = t0;
+    return origin + t * dir;
+}
+
+std::optional<vec3> lineSegmentSphereIntersection(const Sphere& sphere, const vec3& a, const vec3& b)
+{
+    // Consider the line segment as a ray with a max length
+    vec3 o = a;
+    vec3 l = b - a;
+    float maxDist = length(l);
+    l /= maxDist;
+
+    const vec3& c = sphere.origin;
+    const float& r = sphere.radius;
+
+    float inner = mathkit::square(dot(l, o - r)) - (length2(o - c) - r * r);
+    if (inner < 0.0f) {
+        return {};
+    }
+
+    float t1 = sqrt(inner);
+    float t0 = -dot(l, o - c);
+
+    float d0 = t0 - t1;
+    float d1 = t0 + t1;
+
+    bool d0valid = d0 > 0.0f && d0 < maxDist;
+    bool d1valid = d1 > 0.0f && d1 < maxDist;
+    assert(!(d0valid && d1valid));
+
+    if (d0valid) return o + d0 * l;
+    if (d1valid) return o + d1 * l;
+    else return {};
+}
+
+struct Triangle {
+public:
+    Triangle(vec3 v0, vec3 v1, vec3 v2)
+    {
+        v[0] = v0;
+        v[1] = v1;
+        v[2] = v2;
+
+        vec3 crossP = cross(v1 - v0, v2 - v0);
+        area = length(crossP) / 2.0f;
+        normal = normalize(crossP);
+    }
+
+    vec3 v[3];
+    vec3 normal;
+    float area;
+};
+
+auto sphereTriangleIntersection(const Sphere& sphere, const Triangle& triangle)
+{
+    auto a = lineSegmentSphereIntersectionALT(sphere, triangle.v[0], triangle.v[1]);
+    auto b = lineSegmentSphereIntersectionALT(sphere, triangle.v[0], triangle.v[2]);
+    auto c = lineSegmentSphereIntersectionALT(sphere, triangle.v[1], triangle.v[2]);
+
+    struct {
+        vec3 p0;
+        vec3 p1;
+    } returnVal;
+
+    if (a.has_value()) {
+        returnVal.p0 = a.value();
+        if (b.has_value()) returnVal.p1 = b.value();
+        else if (c.has_value()) returnVal.p1 = c.value();
+        else assert(false);
+    } else {
+        returnVal.p0 = b.value();
+        returnVal.p1 = c.value();
+    }
+
+    return returnVal;
+}
+
+float sotvCaseA(const Sphere& sphere, const Triangle& triangle, float h)
+{
+    const float& r = sphere.radius;
+    float omega = solidAngleOfTriangleOnSphere(sphere, triangle.v[0], triangle.v[1], triangle.v[2]);
+    return (1.0f / 3.0f) * ((r * r * r * omega) - (triangle.area * h));
+}
+
+float sotvCaseB(const Sphere& sphere, const Triangle& triangle, float h)
+{
+    return mathkit::PI * (h * h) * (sphere.radius - (h / 3.0f));
+}
+
+float sotvCaseC(const Sphere& sphere, const Triangle& triangle, const bool inSphere[3], float h)
+{
+    auto [p0, p1] = sphereTriangleIntersection(sphere, triangle);
+    vec3 p2 = inSphere[0]
+        ? triangle.v[0]
+        : inSphere[1]
+            ? triangle.v[1]
+            : inSphere[2]
+                ? triangle.v[2]
+                : vec3(0.0f);
+
+    Triangle subTriangle { p0, p1, p2 };
+    float caseA = sotvCaseA(sphere, subTriangle, h);
+
+    // TODO: Calulate swing volume!
+    float swing = 0.0f;
+
+    return caseA + swing;
+}
+
+auto findInsideVertices(const Triangle& triangle, const bool inSphere[3])
+{
+    struct {
+        vec3 a, b;
+    } returnVal;
+
+    if (inSphere[0]) {
+        returnVal.a = triangle.v[0];
+        if (inSphere[1]) returnVal.b = triangle.v[1];
+        else if (inSphere[2]) returnVal.b = triangle.v[2];
+        else assert(false);
+    } else {
+        returnVal.a = triangle.v[1];
+        returnVal.b = triangle.v[2];
+    }
+
+    return returnVal;
+}
+
+float sotvCaseD(const Sphere& sphere, const Triangle& triangle, const bool inSphere[3], float h)
+{
+    auto [p0, p1] = sphereTriangleIntersection(sphere, triangle);
+    auto [p2, p3] = findInsideVertices(triangle, inSphere);
+
+    Triangle caseAtri { p0, p2, p3 };
+    float caseA = sotvCaseA(sphere, caseAtri, h);
+
+    Triangle caseCtri { p0, p3, p1 }; // (technically not outside sphere, but they will have a swing volume)
+    const bool inSphereCaseC[3] = { false, true, false };
+    float caseC = sotvCaseC(sphere, caseCtri, inSphereCaseC, h);
+
+    return caseA + caseC;
+}
+
+float sphereOutsideTriangleVolume(const Sphere& sphere, const Triangle& triangle)
+{
+    bool inSphere[3];
+    int numVerticesOutsideSphere = 3;
+    for (int i = 0; i < 3; ++i) {
+        float dist = distance(sphere.origin, triangle.v[i]);
+        inSphere[i] = dist < sphere.radius;
+        numVerticesOutsideSphere -= inSphere[i];
+    }
+
+    // TODO: Correct?! H is the distance between the sphere center and the triangle's plane
+    float h = abs(dot(triangle.normal, sphere.origin - triangle.v[0]));
+
+    // Is the triangle fully outside the sphere?
+    // (actually, I'm not sure we should special case this..)
+    //if (numVerticesOutsideSphere == 3 && h > sphere.radius) {
+    //    return 0.0f;
+    //}
+
+    switch (numVerticesOutsideSphere) {
+        case 0: return sotvCaseA(sphere, triangle, h);
+        case 3: return sotvCaseB(sphere, triangle, h);
+        case 2: return sotvCaseC(sphere, triangle, inSphere, h);
+        case 1: return sotvCaseD(sphere, triangle, inSphere, h);
+        default: assert(false);
+    }
+}
+
+#define SIGN(x) (x < 0 ? -1 : +1)
+
+float sphereOutsideVolumeAnalytical(const Sphere& sphere, const SphereSet& set)
+{
+    // SOV is the volume outside the triangle set, but inside the sphere
+    //float sov = 0.0f;
+    float vIn = 0.0f;
+
+    for (auto& mesh : set.meshes) {
+        size_t triangleCount = mesh.triangleCount();
+        for (size_t i = 0; i < triangleCount; ++i)
+        {
+            vec3 v0, v1, v2;
+            mesh.triangle(i, v0, v1, v2);
+            Triangle triangle { v0, v1, v2 };
+
+            float h = dot(triangle.normal, sphere.origin - v0);
+            if (abs(h) > sphere.radius) {
+                // No intersection between the sphere and the triangle
+                continue;
+            }
+
+            float sotv = sphereOutsideTriangleVolume(sphere, triangle);
+
+            vec3 p = sphere.origin - h * triangle.normal;
+            vIn += SIGN(dot(triangle.normal, p - sphere.origin)) * sotv;
+        }
+    }
+
+    // TODO: Figure out if the sphere center is inside the object!
+    bool centerInsideObject = true;
+
+    float sov = centerInsideObject
+        ? vIn
+        : sphere.volume() + vIn;
+    return sov;
+}
+
+float totalSphereOutsideVolumeAnalytical(const SphereSet& set)
+{
+    float totalSOV = 0.0f;
+    for (auto& sphere : set.spheres) {
+        totalSOV += sphereOutsideVolumeAnalytical(sphere, set);
+    }
+    return totalSOV;
+}
+
+/*
 float sphereOutsideVolumeUsingVoxels(const Sphere& sphere, const VoxelGrid& grid)
 {
     // TODO: Is there enough precision when using voxels?
@@ -106,6 +404,7 @@ float totalSphereOutsideVolumeUsingVoxels(const SphereSet& set, const VoxelGrid&
     }
     return totalSOV;
 }
+*/
 
 float pointAssignment(SphereSet& set, float previousError)
 {
@@ -164,7 +463,7 @@ float pointAssignment(SphereSet& set, float previousError)
             testSphere.radius = distance(sphere.origin, pointRef.point);
 
             // Check the increase in SOV for the test sphere
-            float testSov = sphereOutsideVolumeUsingVoxels(testSphere, grid);
+            float testSov = sphereOutsideVolumeAnalytical(testSphere, set);
             float sovIncrease = testSov - set.currentSov[si];
 
             if (sovIncrease < smallestSovIncrease) {
@@ -209,7 +508,7 @@ float pointAssignment(SphereSet& set, float previousError)
     }
     fmt::print("\n");
 
-    float newError = totalSphereOutsideVolumeUsingVoxels(set, *set.filledGrid);
+    float newError = totalSphereOutsideVolumeAnalytical(set);
 
     if (newError < previousError) {
         // Success, continue
@@ -248,6 +547,7 @@ void sphereFitting(SphereSet& set)
     for (auto& sphere : set.spheres) {
 
         if (sphere.radius <= 0.0f) {
+            fmt::print("Ignoring sphere (which we probably shouldn't..?\n");
             continue;
         }
 
@@ -265,33 +565,35 @@ void sphereFitting(SphereSet& set)
             sphere.radius
         };
 
+        aabb3 gridBounds = set.filledGrid->gridBounds();
+        double gridMaxDistance = length(gridBounds.max - gridBounds.min);
+
         // TODO: Find good values!
         REAL xLower[n] = {
-            x[0] - sphere.radius,
-            x[1] - sphere.radius,
-            x[2] - sphere.radius,
+            gridBounds.min.x,
+            gridBounds.min.y,
+            gridBounds.min.z,
             0.0
         };
 
         // TODO: Find good values!
         REAL xUpper[n] = {
-            x[0] + sphere.radius,
-            x[1] + sphere.radius,
-            x[2] + sphere.radius,
-            // (definitely shouldn't need to go higher than 10x current radius)
-            sphere.radius * 10.0
+            gridBounds.max.x,
+            gridBounds.max.y,
+            gridBounds.max.z,
+            gridMaxDistance
         };
 
         // "Typically, RHOBEG should be about one tenth of the greatest expected change to a variable"
         // (and we probably should never need to move "outside" the current sphere with either the origin point or the radius.)
         // TODO: Find good value!
-        REAL rhoBeg = sphere.radius / 10.0;
+        REAL rhoBeg = gridMaxDistance / 10.0;
 
         // RHOEND should indicate the accuracy that is required in the final values of the variables
         // NOTE: Some models are tiny, others are huge.. So an absolute/constant accuracy is probably
         //  not very helpful here. A fraction of the sphere radius could maybe work as a scale-aware metric?
         // TODO: Find good value!
-        REAL rhoEnd = sphere.radius / 100.0;
+        REAL rhoEnd = gridMaxDistance * 1e-3;
 
         //The array W will be used for working space.  Its length must be at least
         // (NPT+5)*(NPT+N)+3*N*(N+5)/2.  Upon successful return, the first element of W
@@ -380,14 +682,13 @@ void sphereTeleportation(SphereSet& set)
             sharedVolume += sphereOverlap(self, other);
         }
 
-        float overlapRatio = sharedVolume / totalVolume; // TODO: Correct interpretation? See p. 5 in [Wang 1].
-            //  Don't think so, because the total volume here is constant!
+        float overlapRatio = sharedVolume / (self.volume() + sharedVolume);
         if (overlapRatio > maxOverlapRatio) {
             maxOverlapRatio = overlapRatio;
             maxOverlapRatioIdx = i;
         }
 
-        float sov = sphereOutsideVolumeUsingVoxels(self, *set.filledGrid);
+        float sov = sphereOutsideVolumeAnalytical(self, set);
         if (sov > maxSov) {
             maxSov = sov;
             maxSovIdx = i;
@@ -434,6 +735,7 @@ void sphereTeleportation(SphereSet& set)
 
 void setApplicationWorkingDirectory(char* executableName, const std::string& workingDir)
 {
+#ifdef WIN32
     char fullPathBuf[_MAX_PATH] = {};
     assert(_fullpath(fullPathBuf, executableName, sizeof(fullPathBuf)));
     std::string fullPath { fullPathBuf };
@@ -441,6 +743,15 @@ void setApplicationWorkingDirectory(char* executableName, const std::string& wor
     size_t startOfWorkingDirName = fullPath.find(workingDir);
     std::string newWorkingDir = fullPath.substr(0, startOfWorkingDirName + workingDir.length() + 1);
     assert(_chdir(newWorkingDir.c_str()) == 0);
+#else
+    char fullPathBuf[PATH_MAX] = {};
+    assert(realpath(executableName, fullPathBuf));
+    std::string fullPath { fullPathBuf };
+
+    size_t startOfWorkingDirName = fullPath.find(workingDir);
+    std::string newWorkingDir = fullPath.substr(0, startOfWorkingDirName + workingDir.length() + 1);
+    assert(chdir(newWorkingDir.c_str()) == 0);
+#endif
 }
 
 int main(int argc, char** argv)
@@ -449,9 +760,10 @@ int main(int argc, char** argv)
 
     std::string path = "assets/Bunny/bunny.gltf";
     //std::string path = "assets/Avocado/Avocado.gltf";
+    //std::string path = "assets/Cube/Cube.gltf";
     //std::string path = "assets/BoomBox/BoomBoxWithAxes.gltf";
 
-    constexpr int numSpheres = 16;
+    constexpr int numSpheres = 60;
     const size_t gridDimensions = 32;
 
     std::vector<SimpleMesh> simpleMeshes {};
@@ -482,6 +794,7 @@ int main(int argc, char** argv)
 
     fmt::print("=> preprocessing sphere set\n");
     SphereSet sphereSet = preprocess(filledGrid, numSpheres);
+    sphereSet.meshes = simpleMeshes;
 
     fmt::print("=> optimizing begin\n");
 
