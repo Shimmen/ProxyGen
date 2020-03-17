@@ -5,6 +5,7 @@
 #include "mathkit.h"
 #include <bobyqa.h>
 #include <fmt/format.h>
+#include <nanoflann.hpp>
 #include <random>
 #include <unordered_set>
 #include <vector>
@@ -15,29 +16,160 @@
 #include <unistd.h>
 #endif
 
+struct PointCloud {
+
+    explicit PointCloud(const std::vector<vec3> points)
+        : m_points(points)
+    {
+    }
+
+    // Must return the number of data points
+    inline size_t kdtree_get_point_count() const
+    {
+        return m_points.size();
+    }
+
+    // Returns the dim'th component of the idx'th point in the class:
+    // Since this is inlined and the "dim" argument is typically an immediate value, the
+    //  "if/else's" are actually solved at compile time.
+    inline float kdtree_get_pt(const size_t idx, const size_t dim) const
+    {
+        vec3 points = m_points[idx];
+        return points[dim];
+    }
+
+    // Optional bounding-box computation: return false to default to a standard bbox computation loop.
+    //   Return true if the BBOX was already computed by the class and returned in "bb" so it can be avoided to redo it again.
+    //   Look at bb.size() to find out the expected dimensionality (e.g. 2 or 3 for point clouds)
+    template<class BBOX>
+    bool kdtree_get_bbox(BBOX&) const { return false; }
+
+private:
+    const std::vector<vec3> m_points;
+};
+
+using namespace nanoflann;
+typedef KDTreeSingleIndexAdaptor<L2_Simple_Adaptor<float, PointCloud>, PointCloud, 3> MyKdTree;
+
 struct SphereSet {
     std::vector<Sphere> spheres;
     std::vector<float> currentSov;
 
+    std::vector<vec3> points;
+
+    std::unique_ptr<PointCloud> pointCloud;
+    std::unique_ptr<MyKdTree> kdTree;
+
     const VoxelGrid* filledGrid;
-    std::vector<SimpleMesh> meshes;
+    const std::vector<SimpleMesh>* meshes;
 };
 
-SphereSet preprocess(const VoxelGrid& filledGrid, int numSpheres)
+struct Triangle {
+public:
+    Triangle(vec3 v0, vec3 v1, vec3 v2)
+    {
+        v[0] = v0;
+        v[1] = v1;
+        v[2] = v2;
+
+        vec3 crossP = cross(v1 - v0, v2 - v0);
+        area = length(crossP) / 2.0f;
+        normal = normalize(crossP);
+    }
+
+    vec3 v[3];
+    vec3 normal;
+    float area;
+};
+
+void collectSurfacePoints(const std::vector<SimpleMesh>& meshes, std::vector<vec3>& points)
 {
+    std::vector<Triangle> allTriangles;
+    double totalArea = 0.0;
+
+    for (auto& mesh : meshes) {
+        size_t triangleCount = mesh.triangleCount();
+        for (size_t i = 0; i < triangleCount; ++i) {
+            vec3 v0, v1, v2;
+            mesh.triangle(i, v0, v1, v2);
+            allTriangles.emplace_back(v0, v1, v2);
+
+            totalArea += allTriangles.back().area;
+        }
+    }
+
+    // Sort largest triangles first
+    std::sort(allTriangles.begin(), allTriangles.end(), [](const Triangle& lhs, const Triangle& rhs) {
+        return lhs.area > rhs.area;
+    });
+
+    // Not an exact science, but we do want some level of coverage
+    size_t numSurfacePoints = 1024; //allTriangles.size();
+    points.reserve(numSurfacePoints);
+
+    std::mt19937_64 generator;
+    for (size_t i = 0; i < numSurfacePoints; ++i) {
+
+        // Select random triangle proportionally to the triangle area
+        double randomArea = std::uniform_real_distribution<double> { 0.0, totalArea }(generator);
+        double accumArea = 0.0;
+        for (auto& triangle : allTriangles) {
+            accumArea += triangle.area;
+            if (accumArea >= randomArea) {
+                // Select random point in triangle
+                float b, c;
+                do {
+                    b = std::uniform_real_distribution<float> { 0.0f, 1.0f }(generator);
+                    c = std::uniform_real_distribution<float> { 0.0f, 1.0f }(generator);
+                } while (b + c < 1.0f);
+
+                vec3 e1 = triangle.v[1] - triangle.v[0];
+                vec3 e2 = triangle.v[2] - triangle.v[0];
+
+                vec3 sample = triangle.v[0] + (e1 * b) + (e2 * c);
+                points.push_back(sample);
+                break;
+            }
+        }
+    }
+
+    assert(points.size() == numSurfacePoints);
+}
+
+void collectInnerPoints(const VoxelGrid& filledGrid, std::vector<vec3>& points)
+{
+}
+
+SphereSet preprocess(const std::vector<SimpleMesh>& meshes, const VoxelGrid& filledGrid, int numSpheres)
+{
+    SphereSet set;
+    set.filledGrid = &filledGrid;
+    set.meshes = &meshes;
+
+    std::vector<vec3> surfacePoints;
+    collectSurfacePoints(meshes, surfacePoints);
+
+    // TODO: Needed or not? They describe it in the paper, but I don't know if it actually is needed..
+    //std::vector<vec3> innerPoints;
+    //collectInnerPoints(filledGrid, innerPoints);
+
+    set.points = surfacePoints;
+
+    set.pointCloud = std::make_unique<PointCloud>(set.points);
+    set.kdTree = std::make_unique<MyKdTree>(3 /* dim */, *set.pointCloud, KDTreeSingleIndexAdaptorParams(10 /* max leaf */));
+    set.kdTree->buildIndex();
+
     assert(numSpheres > 0);
     assert(numSpheres <= filledGrid.numFilledVoxels());
 
-    SphereSet sphereSet {};
-    sphereSet.filledGrid = &filledGrid;
-
+#if 1
     aabb3 bounds = filledGrid.gridBounds();
     std::uniform_real_distribution<float> uniformInGridX { bounds.min.x, bounds.max.x };
     std::uniform_real_distribution<float> uniformInGridY { bounds.min.y, bounds.max.y };
     std::uniform_real_distribution<float> uniformInGridZ { bounds.min.z, bounds.max.z };
     std::default_random_engine generator {};
 
-    while (sphereSet.spheres.size() < numSpheres) {
+    while (set.spheres.size() < numSpheres) {
 
         float x = uniformInGridX(generator);
         float y = uniformInGridY(generator);
@@ -46,12 +178,19 @@ SphereSet preprocess(const VoxelGrid& filledGrid, int numSpheres)
         ivec3 gridCoord = filledGrid.remapToGridSpace({ x, y, z }, std::round);
         if (filledGrid.get(gridCoord) > 0) {
             Sphere sphere { vec3(x, y, z), 0.0f };
-            sphereSet.spheres.push_back(sphere);
-            sphereSet.currentSov.push_back(0.0f);
+            set.spheres.push_back(sphere);
+            set.currentSov.push_back(0.0f);
         }
     }
 
-    return sphereSet;
+#else
+    for (const vec3& point : surfacePoints) {
+        Sphere sphere { point, 0.01f };
+        set.spheres.push_back(sphere);
+    }
+#endif
+
+    return set;
 }
 
 float solidAngleOfTriangleOnSphere(const Sphere& sphere, const vec3& v0, const vec3& v1, const vec3& v2)
@@ -68,7 +207,7 @@ float solidAngleOfTriangleOnSphere(const Sphere& sphere, const vec3& v0, const v
     float c = length(vc);
 
     float numerator = abs(dot(va, cross(vb, vc)));
-    float denomenator = a*b*c + dot(va, vb) * c + dot(va, vc) * b + dot(vb, vc) * a;
+    float denomenator = a * b * c + dot(va, vb) * c + dot(va, vc) * b + dot(vb, vc) * a;
 
     float tanHalfOmega = numerator / denomenator;
     float halfOmega = atan(tanHalfOmega);
@@ -80,19 +219,22 @@ float solidAngleOfTriangleOnSphere(const Sphere& sphere, const vec3& v0, const v
     return omega;
 }
 
-bool solveQuadratic(const float &a, const float &b, const float &c, float &x0, float &x1)
+bool solveQuadratic(const float& a, const float& b, const float& c, float& x0, float& x1)
 {
     float discr = b * b - 4 * a * c;
-    if (discr < 0) return false;
-    else if (discr == 0) x0 = x1 = - 0.5 * b / a;
+    if (discr < 0)
+        return false;
+    else if (discr == 0)
+        x0 = x1 = -0.5 * b / a;
     else {
         float q = (b > 0)
-            ? -0.5 * (b + sqrt(discr))
-            : -0.5 * (b - sqrt(discr));
+            ? -0.5f * (b + sqrtf(discr))
+            : -0.5f * (b - sqrtf(discr));
         x0 = q / a;
         x1 = c / q;
     }
-    if (x0 > x1) std::swap(x0, x1);
+    if (x0 > x1)
+        std::swap(x0, x1);
 
     return true;
 }
@@ -157,28 +299,13 @@ std::optional<vec3> lineSegmentSphereIntersection(const Sphere& sphere, const ve
     bool d1valid = d1 > 0.0f && d1 < maxDist;
     assert(!(d0valid && d1valid));
 
-    if (d0valid) return o + d0 * l;
-    if (d1valid) return o + d1 * l;
-    else return {};
+    if (d0valid)
+        return o + d0 * l;
+    if (d1valid)
+        return o + d1 * l;
+    else
+        return {};
 }
-
-struct Triangle {
-public:
-    Triangle(vec3 v0, vec3 v1, vec3 v2)
-    {
-        v[0] = v0;
-        v[1] = v1;
-        v[2] = v2;
-
-        vec3 crossP = cross(v1 - v0, v2 - v0);
-        area = length(crossP) / 2.0f;
-        normal = normalize(crossP);
-    }
-
-    vec3 v[3];
-    vec3 normal;
-    float area;
-};
 
 auto sphereTriangleIntersection(const Sphere& sphere, const Triangle& triangle)
 {
@@ -193,9 +320,12 @@ auto sphereTriangleIntersection(const Sphere& sphere, const Triangle& triangle)
 
     if (a.has_value()) {
         returnVal.p0 = a.value();
-        if (b.has_value()) returnVal.p1 = b.value();
-        else if (c.has_value()) returnVal.p1 = c.value();
-        else assert(false);
+        if (b.has_value())
+            returnVal.p1 = b.value();
+        else if (c.has_value())
+            returnVal.p1 = c.value();
+        else
+            assert(false);
     } else {
         returnVal.p0 = b.value();
         returnVal.p1 = c.value();
@@ -244,9 +374,12 @@ auto findInsideVertices(const Triangle& triangle, const bool inSphere[3])
 
     if (inSphere[0]) {
         returnVal.a = triangle.v[0];
-        if (inSphere[1]) returnVal.b = triangle.v[1];
-        else if (inSphere[2]) returnVal.b = triangle.v[2];
-        else assert(false);
+        if (inSphere[1])
+            returnVal.b = triangle.v[1];
+        else if (inSphere[2])
+            returnVal.b = triangle.v[2];
+        else
+            assert(false);
     } else {
         returnVal.a = triangle.v[1];
         returnVal.b = triangle.v[2];
@@ -290,11 +423,16 @@ float sphereOutsideTriangleVolume(const Sphere& sphere, const Triangle& triangle
     //}
 
     switch (numVerticesOutsideSphere) {
-        case 0: return sotvCaseA(sphere, triangle, h);
-        case 3: return sotvCaseB(sphere, triangle, h);
-        case 2: return sotvCaseC(sphere, triangle, inSphere, h);
-        case 1: return sotvCaseD(sphere, triangle, inSphere, h);
-        default: assert(false);
+    case 0:
+        return sotvCaseA(sphere, triangle, h);
+    case 3:
+        return sotvCaseB(sphere, triangle, h);
+    case 2:
+        return sotvCaseC(sphere, triangle, inSphere, h);
+    case 1:
+        return sotvCaseD(sphere, triangle, inSphere, h);
+    default:
+        assert(false);
     }
 }
 
@@ -306,10 +444,9 @@ float sphereOutsideVolumeAnalytical(const Sphere& sphere, const SphereSet& set)
     //float sov = 0.0f;
     float vIn = 0.0f;
 
-    for (auto& mesh : set.meshes) {
+    for (auto& mesh : *set.meshes) {
         size_t triangleCount = mesh.triangleCount();
-        for (size_t i = 0; i < triangleCount; ++i)
-        {
+        for (size_t i = 0; i < triangleCount; ++i) {
             vec3 v0, v1, v2;
             mesh.triangle(i, v0, v1, v2);
             Triangle triangle { v0, v1, v2 };
@@ -328,6 +465,7 @@ float sphereOutsideVolumeAnalytical(const Sphere& sphere, const SphereSet& set)
     }
 
     // TODO: Figure out if the sphere center is inside the object!
+    //  Could we not just make sure it always is? Maybe not optimal for some cases..?
     bool centerInsideObject = true;
 
     float sov = centerInsideObject
@@ -405,6 +543,160 @@ float totalSphereOutsideVolumeUsingVoxels(const SphereSet& set, const VoxelGrid&
     return totalSOV;
 }
 */
+
+float pointAssignmentFromListOfPoints(SphereSet& set, float previousError)
+{
+    // TODO: From the paper "the [current] (naive) algorithm for point assignment can be accelerated"
+    //  See p. 5 in the paper for more information. It's already slow and the SOV function is just a stub!
+
+    std::vector<bool> visited;
+    visited.resize(set.points.size());
+
+    struct PointRef {
+        PointRef(vec3 point, int32_t index)
+            : point(point)
+            , index(index)
+        {
+        }
+        vec3 point;
+        int32_t index;
+    };
+
+    std::vector<PointRef> stack {};
+
+    for (auto& [sphereCenter, _] : set.spheres) {
+        PointRef pointRef { sphereCenter, -1 };
+        stack.push_back(pointRef);
+    }
+
+    auto oldSpheres = set.spheres;
+    auto oldSphereSov = set.currentSov;
+
+    int numAssigned = 0;
+    int numToAssign = set.points.size() + set.spheres.size();
+
+    while (!stack.empty()) {
+        PointRef pointRef = stack.back();
+        stack.pop_back();
+
+        int bestSphereIdx = -1;
+        float smallestSovIncrease = INFINITY;
+
+        float newPotentialRadius = INFINITY;
+        float newPotentialSov = INFINITY;
+
+        for (int si = 0; si < set.spheres.size(); ++si) {
+            Sphere& sphere = set.spheres[si];
+
+            // Create a test sphere with radius required to contain the test point
+            Sphere testSphere = sphere;
+            testSphere.radius = distance(sphere.origin, pointRef.point);
+
+            // Check the increase in SOV for the test sphere
+            float testSov = sphereOutsideVolumeAnalytical(testSphere, set);
+            float sovIncrease = testSov - set.currentSov[si];
+
+            if (sovIncrease < smallestSovIncrease) {
+                smallestSovIncrease = sovIncrease;
+                bestSphereIdx = si;
+
+                // Save these for speed (radius) and accuracy (SOV)
+                newPotentialRadius = testSphere.radius;
+                newPotentialSov = testSov;
+            }
+        }
+
+        // Expand the best sphere to contain the new point
+        assert(bestSphereIdx != -1);
+        set.spheres[bestSphereIdx].radius = newPotentialRadius;
+        set.currentSov[bestSphereIdx] = newPotentialSov;
+
+        // Insert unvisited neighbors into the stack
+#if 1
+        size_t maxNeighboursToAdd = 10;
+
+    stupidGotoForEasyExperimenting:
+
+        std::vector<size_t> retIndex(maxNeighboursToAdd);
+        std::vector<float> outDistSqr(maxNeighboursToAdd);
+
+        size_t numActualNeighbours = set.kdTree->knnSearch(value_ptr(pointRef.point), maxNeighboursToAdd, &retIndex[0], &outDistSqr[0]);
+
+        // In case of less points in the tree than requested:
+        retIndex.resize(numActualNeighbours);
+        outDistSqr.resize(numActualNeighbours);
+
+        int numAdded = 0;
+        for (size_t ki = 0; ki < numActualNeighbours; ++ki) {
+
+            size_t pointIdx = retIndex[ki];
+            if (!visited[pointIdx]) {
+                visited[pointIdx] = true;
+
+                vec3 point = set.points[pointIdx];
+                stack.emplace_back(point, pointIdx);
+
+                numAdded += 1;
+
+                assert(stack.size() <= numToAssign);
+            }
+        }
+
+        // If we can't find any more points to add and we have considered all possible points
+        if (numAdded == 0) {
+            if (maxNeighboursToAdd < set.points.size()) {
+                maxNeighboursToAdd += 10;
+                goto stupidGotoForEasyExperimenting;
+            }
+        }
+#else
+        float nearestUnvisitedDist2 = 99999.99f;
+        int64_t nearestUnvisitedIdx = -1;
+
+        for (size_t pi = 0; pi < set.points.size(); ++pi) {
+
+            if (visited[pi]) {
+                continue;
+            }
+
+            const vec3& neighbour = set.points[pi];
+            float dist2 = distance2(pointRef.point, neighbour);
+
+            if (dist2 < nearestUnvisitedDist2) {
+                nearestUnvisitedDist2 = dist2;
+                nearestUnvisitedIdx = pi;
+            }
+        }
+
+        //assert(nearestUnvisitedIdx != -1);
+        if (nearestUnvisitedIdx != -1) {
+            visited[nearestUnvisitedIdx] = true;
+            stack.emplace_back(set.points[nearestUnvisitedIdx], nearestUnvisitedIdx);
+        }
+#endif
+
+        numAssigned += 1;
+
+        // Hmm, now we have set.points.size() which isn't exactly the number of assigned stuff, right?
+        if (numAssigned % 30 == 0 || numAssigned == numToAssign) {
+            fmt::print("     assigned {}/{} points ({:.1f}%)\r", numAssigned, numToAssign, 100.0f * float(numAssigned) / float(numToAssign));
+            fflush(stdout);
+        }
+    }
+    fmt::print("\n");
+
+    float newError = totalSphereOutsideVolumeAnalytical(set);
+
+    if (newError < previousError) {
+        // Success, continue
+        return newError;
+    } else {
+        // Failure, rollback the changes & trigger sphere teleportation
+        set.spheres = oldSpheres;
+        set.currentSov = oldSphereSov;
+        return previousError;
+    }
+}
 
 float pointAssignment(SphereSet& set, float previousError)
 {
@@ -523,23 +815,16 @@ float pointAssignment(SphereSet& set, float previousError)
 
 REAL sphereFittingObjectiveFunction(const INTEGER n, const REAL* x, void* data)
 {
-    // TODO: Implement the real objective function here!
+    assert(n == 4);
 
-    INTEGER i;
-    REAL f, temp, tempa, tempb;
+    Sphere sphere;
+    sphere.radius = x[3];
+    sphere.origin = { x[0], x[1], x[2] };
 
-    f = 0.0;
-    for (i = 4; i <= n; i += 2) {
-        INTEGER j, j1 = i - 2;
-        for (j = 2; j <= j1; j += 2) {
-            tempa = x[i - 2] - x[j - 2];
-            tempb = x[i - 1] - x[j - 1];
-            temp = tempa * tempa + tempb * tempb;
-            temp = std::max(temp, 1e-6);
-            f += 1.0 / std::sqrt(temp);
-        }
-    }
-    return f;
+    const SphereSet& sphereSet = *reinterpret_cast<SphereSet*>(data);
+    float sov = sphereOutsideVolumeAnalytical(sphere, sphereSet);
+
+    return sov;
 }
 
 void sphereFitting(SphereSet& set)
@@ -547,7 +832,7 @@ void sphereFitting(SphereSet& set)
     for (auto& sphere : set.spheres) {
 
         if (sphere.radius <= 0.0f) {
-            fmt::print("Ignoring sphere (which we probably shouldn't..?\n");
+            //fmt::print("Ignoring sphere (which we probably shouldn't..?\n");
             continue;
         }
 
@@ -585,7 +870,6 @@ void sphereFitting(SphereSet& set)
         };
 
         // "Typically, RHOBEG should be about one tenth of the greatest expected change to a variable"
-        // (and we probably should never need to move "outside" the current sphere with either the origin point or the radius.)
         // TODO: Find good value!
         REAL rhoBeg = gridMaxDistance / 10.0;
 
@@ -600,16 +884,18 @@ void sphereFitting(SphereSet& set)
         // will be set to the function value at the solution. */
         REAL workingMemory[(npt + 5) * (npt + n) + 3 * n * (n + 5) / 2];
 
-        INTEGER logLevel = 2;
+        INTEGER logLevel = 1;
         INTEGER maxObjFunCalls = 100;
 
-        int status = bobyqa(n, npt, sphereFittingObjectiveFunction, nullptr,
+        int status = bobyqa(n, npt, sphereFittingObjectiveFunction, (void*)(&set),
                             x, xLower, xUpper, rhoBeg, rhoEnd,
                             logLevel, maxObjFunCalls, workingMemory);
 
         switch (status) {
         case BOBYQA_SUCCESS:
             // algorithm converged!
+            sphere.origin = { x[0], x[1], x[2] };
+            sphere.radius = x[3];
             return;
         case BOBYQA_BAD_NPT:
             fmt::print("bobyqa error: NPT is not in the required interval\n");
@@ -733,6 +1019,20 @@ void sphereTeleportation(SphereSet& set)
     }
 }
 
+void generateOutput(const SphereSet& sphereSet)
+{
+    size_t sphereCount = sphereSet.spheres.size();
+
+    fmt::print("const vec4 spheres[] = vec4[](\n");
+    for (size_t i = 0; i < sphereCount; ++i) {
+        const Sphere& sphere = sphereSet.spheres[i];
+        fmt::print("\tvec4({}, {}, {}, {}){}\n",
+                   sphere.origin.x, sphere.origin.y, sphere.origin.z,
+                   sphere.radius, (i + 1 == sphereCount) ? "" : ",");
+    }
+    fmt::print(");\n");
+}
+
 void setApplicationWorkingDirectory(char* executableName, const std::string& workingDir)
 {
 #ifdef WIN32
@@ -758,13 +1058,13 @@ int main(int argc, char** argv)
 {
     setApplicationWorkingDirectory(argv[0], "ProxyGen");
 
-    std::string path = "assets/Bunny/bunny.gltf";
+    std::string path = "assets/Bunny/bunny_lowres.gltf";
     //std::string path = "assets/Avocado/Avocado.gltf";
     //std::string path = "assets/Cube/Cube.gltf";
     //std::string path = "assets/BoomBox/BoomBoxWithAxes.gltf";
 
     constexpr int numSpheres = 60;
-    const size_t gridDimensions = 32;
+    const size_t gridDimensions = 64;
 
     std::vector<SimpleMesh> simpleMeshes {};
 
@@ -793,8 +1093,7 @@ int main(int argc, char** argv)
     filledGrid.fillVolumes(simpleMeshes);
 
     fmt::print("=> preprocessing sphere set\n");
-    SphereSet sphereSet = preprocess(filledGrid, numSpheres);
-    sphereSet.meshes = simpleMeshes;
+    SphereSet sphereSet = preprocess(simpleMeshes, filledGrid, numSpheres);
 
     fmt::print("=> optimizing begin\n");
 
@@ -806,8 +1105,11 @@ int main(int argc, char** argv)
     for (; iteration < maxIterations; ++iteration) {
 
         fmt::print("==> point assignment\n");
-        float newError = pointAssignment(sphereSet, previousError);
+        //float newError = pointAssignment(sphereSet, previousError);
+        float newError = pointAssignmentFromListOfPoints(sphereSet, previousError);
         fmt::print("     error: {}\n", newError);
+
+        generateOutput(sphereSet);
 
         if (newError < 1e-12f) {
             // in practice this probably shouldn't happen, but since our voxel grid resolution is quite low it can happen.
@@ -825,7 +1127,7 @@ int main(int argc, char** argv)
         }
 
         if (newError < previousError) {
-            fmt::print("===> sphere fitting\n");
+            fmt::print("===> sphere fitting");
             sphereFitting(sphereSet);
         } else {
             fmt::print("===> sphere teleportation\n");
@@ -843,13 +1145,5 @@ int main(int argc, char** argv)
     fmt::print("=> optimizing done\n");
 
     fmt::print("=> generating sphere output\n");
-
-    fmt::print("const vec4 spheres[] = vec4[](\n");
-    for (size_t i = 0; i < numSpheres; ++i) {
-        const Sphere& sphere = sphereSet.spheres[i];
-        fmt::print("\tvec4({}, {}, {}, {}){}\n",
-                   sphere.origin.x, sphere.origin.y, sphere.origin.z,
-                   sphere.radius, (i + 1 == numSpheres) ? "" : ",");
-    }
-    fmt::print(");\n");
+    generateOutput(sphereSet);
 }
