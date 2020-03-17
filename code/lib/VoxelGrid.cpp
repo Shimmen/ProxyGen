@@ -6,6 +6,8 @@
 #include <fstream>
 #include <sstream>
 
+#define MIN(a, b) ((a < b) ? a : b)
+
 VoxelGrid::VoxelGrid(glm::ivec3 size, aabb3 bounds)
     : m_bounds(bounds)
     , m_sx(size.x)
@@ -396,9 +398,9 @@ void VoxelGrid::writeToVox(const std::string& path) const
         stream << content;
     };
 
-    int32_t sx = std::min(m_sx, 126ull);
-    int32_t sy = std::min(m_sy, 126ull);
-    int32_t sz = std::min(m_sz, 126ull);
+    int32_t sx = MIN(m_sx, 126ull);
+    int32_t sy = MIN(m_sy, 126ull);
+    int32_t sz = MIN(m_sz, 126ull);
 
     std::ostringstream sizeBuffer {};
     writeInt32(sizeBuffer, sx);
