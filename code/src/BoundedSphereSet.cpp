@@ -211,23 +211,38 @@ double sphereSetUnionVolume(const SphereSet& set)
     return volume;
 }
 
-REAL sphereFittingObjectiveFunction(const INTEGER n, const REAL* x, void* data)
+struct SphereFittingData {
+    SphereSet* set;
+    unsigned sphereIndex;
+};
+
+REAL sphereFittingObjectiveFunction(const INTEGER n, const REAL* x, void* dataPtr)
 {
     assert(n == 4);
 
-    Sphere sphere;
-    sphere.radius = x[3];
-    sphere.origin = { x[0], x[1], x[2] };
+    Sphere testSphere;
+    testSphere.radius = x[3];
+    testSphere.origin = { x[0], x[1], x[2] };
 
-    const SphereSet& set = *reinterpret_cast<SphereSet*>(data);
+    SphereFittingData& data = *reinterpret_cast<SphereFittingData*>(dataPtr);
+    SphereSet& set = *data.set;
 
-    if (!sphereInsideMeshVolume(sphere, set.mesh)) {
-        return std::numeric_limits<REAL>::max();
+    // Temporarily swap in the sphere to test
+    Sphere currentSphere = set.spheres[data.sphereIndex];
+    set.spheres[data.sphereIndex] = testSphere;
+
+    if (!sphereInsideMeshVolume(testSphere, set.mesh)) {
+        return 99999.99; // BOBYQA doesn't seem to like infinities, but this will do
     }
 
     // Since BOBYQA solves a minimization problem we want to minimize
     // the *negative* volume to get a maximal volume solution.
-    return -sphereSetUnionVolume(set);
+    double metric = -sphereSetUnionVolume(set);
+
+    // Replace the current sphere back into the sphere set
+    set.spheres[data.sphereIndex] = currentSphere;
+
+    return metric;
 }
 
 void sphereFitting(SphereSet& set)
@@ -236,7 +251,9 @@ void sphereFitting(SphereSet& set)
     unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
     std::shuffle(set.spheres.begin(), set.spheres.end(), std::default_random_engine(seed));
 
-    for (auto& sphere : set.spheres) {
+    for (size_t sphereIdx = 0; sphereIdx < set.spheres.size(); ++sphereIdx) {
+
+        Sphere& sphere = set.spheres[sphereIdx];
         assert(sphere.radius > 0.0);
 
         // Origin (3) + radius (1)
@@ -275,7 +292,7 @@ void sphereFitting(SphereSet& set)
             boxInSphere.min.x,
             boxInSphere.min.y,
             boxInSphere.min.z,
-            sphere.radius - 1e-8
+            1e-8
         };
 
         aabb3 gridBounds = set.grids.shell->gridBounds();
@@ -290,32 +307,47 @@ void sphereFitting(SphereSet& set)
 
         // "Typically, RHOBEG should be about one tenth of the greatest expected change to a variable"
         // TODO: Find good value!
-        REAL rhoBeg = (2.0 * sphere.radius) / 10.0;
+        REAL rhoBeg = (2.0 * d) / 10.0;
 
         // RHOEND should indicate the accuracy that is required in the final values of the variables
         // NOTE: Some models are tiny, others are huge.. So an absolute/constant accuracy is probably
         //  not very helpful here. A fraction of the sphere radius could maybe work as a scale-aware metric?
         // TODO: Find good value!
-        REAL rhoEnd = gridMaxDistance * 1e-6;
+        REAL rhoEnd = gridMaxDistance * 1e-8;
 
         //The array W will be used for working space.  Its length must be at least
         // (NPT+5)*(NPT+N)+3*N*(N+5)/2.  Upon successful return, the first element of W
         // will be set to the function value at the solution. */
         REAL workingMemory[(npt + 5) * (npt + n) + 3 * n * (n + 5) / 2];
 
-        INTEGER logLevel = 1;
-        INTEGER maxObjFunCalls = 1000;
+        INTEGER logLevel = 0;
+        INTEGER maxObjFunCalls = 10'000;
 
-        int status = bobyqa(n, npt, sphereFittingObjectiveFunction, (void*)(&set),
+        SphereFittingData data { &set, sphereIdx };
+
+        int status = bobyqa(n, npt, sphereFittingObjectiveFunction, (void*)(&data),
                             x, xLower, xUpper, rhoBeg, rhoEnd,
                             logLevel, maxObjFunCalls, workingMemory);
 
         switch (status) {
-        case BOBYQA_SUCCESS:
+        case BOBYQA_SUCCESS: {
             // algorithm converged!
-            sphere.origin = { x[0], x[1], x[2] };
-            sphere.radius = x[3];
+            vec3 newOrigin { x[0], x[1], x[2] };
+            double newRadius = x[3];
+
+#if 0
+            fmt::print("      - ({}, {}, {}) r={}\n", newOrigin.x, newOrigin.y, newOrigin.z, newRadius);
+
+            vec3 diffOrigin = newOrigin - sphere.origin;
+            double diffRadius = newRadius - sphere.radius;
+            //fmt::print("      - ({}, {}, {}) r={}\n", diffOrigin.x, diffOrigin.y, diffOrigin.z, diffRadius);
+            //assert(length(diffOrigin) > 1e-6 && abs(diffRadius > 1e-6));
+#endif
+
+            sphere.origin = newOrigin;
+            sphere.radius = newRadius;
             return;
+        }
         case BOBYQA_BAD_NPT:
             fmt::print("bobyqa error: NPT is not in the required interval\n");
             assert(false); // npt is hardcoded to a valid value!
@@ -340,7 +372,13 @@ void sphereFitting(SphereSet& set)
 
 void sphereTeleportation(SphereSet& set)
 {
-    // TODO: Implement a sphere teleportation strategy!
+    if (set.spheres.size() == 1) {
+        // TODO: Maybe pick a new starting point?
+        // Or let the teleportation fail like this and restart from the main loop?
+        return;
+    }
+
+    // TODO: Implement a sphere teleportation strategy for more than >1 spheres
     assert(false);
 }
 
@@ -383,13 +421,13 @@ int main(int argc, char** argv)
 {
     setApplicationWorkingDirectory(argv[0], "ProxyGen");
 
-    std::string path = "assets/Bunny/bunny_lowres.gltf";
+    //std::string path = "assets/Bunny/bunny_lowres.gltf";
     //std::string path = "assets/Avocado/Avocado.gltf";
-    //std::string path = "assets/Cube/Cube.gltf";
+    std::string path = "assets/Sphere/sphere.gltf";
     //std::string path = "assets/BoomBox/BoomBoxWithAxes.gltf";
 
-    constexpr unsigned numSpheres = 60;
-    const size_t gridDimensions = 128;
+    constexpr unsigned numSpheres = 1;
+    const size_t gridDimensions = 64;
 
     fmt::print("=> loading model '{}'\n", path);
     auto [basePath, model] = GltfUtil::loadModel(path);
@@ -417,21 +455,20 @@ int main(int argc, char** argv)
     set.grids.inside = std::make_unique<VoxelGrid>(*set.grids.filled);
     set.grids.inside->subtractGrid(*set.grids.shell);
 
-    //set.grids.inside->writeToVox("assets/bunnyInside.vox");
-    //return 0;
-
     fmt::print("=> assigning initial spheres\n");
     assignSpheresRandomlyInVolume(set, numSpheres);
 
-    //generateOutput(set);
-    //return 0;
-
     fmt::print("=> optimizing begin\n");
+
+    Sphere targetSphere;
+    targetSphere.origin = { 0, 0, 0 };
+    targetSphere.radius = 1.0;
+    fmt::print("OPTIMAL SPHERE VOLUME: {}\n", targetSphere.volume());
 
     bool didJustTeleport = false;
     double previousVolume = -std::numeric_limits<double>::infinity();
 
-    constexpr int maxIterations = 100;
+    constexpr int maxIterations = 1000;
     int iteration = 0;
     for (; iteration < maxIterations; ++iteration) {
 
@@ -439,9 +476,6 @@ int main(int argc, char** argv)
         expandSpheresMaximally(set);
         double newVolume = sphereSetUnionVolume(set);
         fmt::print("   volume: {}\n", newVolume);
-
-        generateOutput(set);
-        return 0;
 
         if (didJustTeleport) {
             didJustTeleport = false;
