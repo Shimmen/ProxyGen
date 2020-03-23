@@ -22,3 +22,8 @@ target_link_libraries(SphereSet PRIVATE ProxyGenLib)
 target_link_libraries(SphereSet PRIVATE bobyqa)
 target_link_libraries(SphereSet PRIVATE nanoflann::nanoflann)
 target_compile_options(SphereSet PRIVATE ${PROXYGEN_WARNINGS})
+
+add_executable(BoundedSphereSet src/BoundedSphereSet.cpp)
+target_link_libraries(BoundedSphereSet PRIVATE ProxyGenLib)
+target_link_libraries(BoundedSphereSet PRIVATE bobyqa)
+target_compile_options(BoundedSphereSet PRIVATE ${PROXYGEN_WARNINGS})

@@ -217,7 +217,7 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurfa
                             mesh.triangleTexcoords(ti, uv0, uv1, uv2);
 
                             vec2 uv = alpha * uv0 + beta * uv1 + gamma * uv2;
-                            
+
                             vec3 color = vec3(1, 0, 1);
                             if (mesh.hasTexture()) {
                                 color = mesh.texture().sample(uv);
@@ -284,6 +284,26 @@ void VoxelGrid::fillVolumes(const std::vector<SimpleMesh>& meshes)
                 if (!filling && d < -0.4f) {
                     filling = true;
                     continue;
+                }
+            }
+        }
+    }
+}
+
+void VoxelGrid::subtractGrid(const VoxelGrid& other)
+{
+    assert(gridDimensions() == other.gridDimensions());
+    assert(gridBounds().min == other.gridBounds().min);
+    assert(gridBounds().max == other.gridBounds().max);
+
+    for (size_t z = 0; z < m_sz; ++z) {
+        for (size_t y = 0; y < m_sy; ++y) {
+            for (size_t x = 0; x < m_sx; ++x) {
+
+                uint8_t sub = other.get(x, y, z);
+                if (sub > 0) {
+                    uint8_t current = get(x, y, z);
+                    set(x, y, z, (sub >= current) ? current - sub : 0);
                 }
             }
         }

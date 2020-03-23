@@ -32,6 +32,7 @@ public:
 
     void insertMesh(const SimpleMesh&, bool assignVoxelColorsToSurface);
     void fillVolumes(const std::vector<SimpleMesh>&);
+    void subtractGrid(const VoxelGrid&);
 
     void quantizeColors(uint32_t numBins);
     void writeToVox(const std::string& path) const;

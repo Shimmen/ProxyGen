@@ -33,8 +33,8 @@ namespace mathkit {
 
 #include <glm/gtc/matrix_transform.hpp>
 
-constexpr float PI = 3.14159265359f;
-constexpr float TWO_PI = 2.0f * PI;
+constexpr double PI = 3.14159265359;
+constexpr double TWO_PI = 2.0 * PI;
 
 constexpr vec3 globalX = vec3 { 1.0f, 0.0f, 0.0f };
 constexpr vec3 globalY = vec3 { 0.0f, 1.0f, 0.0f };
@@ -44,12 +44,17 @@ constexpr vec3 globalRight = globalX;
 constexpr vec3 globalUp = globalY;
 constexpr vec3 globalForward = -globalZ;
 
-constexpr float radians(float degrees)
+inline constexpr float radians(float degrees)
 {
     return degrees / 180.0f * PI;
 }
 
-constexpr float square(float x)
+inline constexpr float square(float x)
+{
+    return x * x;
+}
+
+inline constexpr double square(double x)
 {
     return x * x;
 }
