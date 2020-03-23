@@ -139,7 +139,10 @@ std::vector<size_t> GltfUtil::indexData(const tinygltf::Model& model, const tiny
 
 std::string GltfUtil::baseColorTextureURI(const tinygltf::Model& model, const tinygltf::Primitive& primitive)
 {
-    assert(primitive.material != -1);
+    if (primitive.material == -1) {
+        return "";
+    }
+
     auto& material = model.materials[primitive.material];
     int texIndex = material.pbrMetallicRoughness.baseColorTexture.index;
     if (texIndex == -1) {
