@@ -51,18 +51,44 @@ public:
     float area;
 };
 
-void assignSpheresRandomlyInVolume(SphereSet& set, unsigned numSpheres)
+vec3 getRandomSphereLocationInsideMesh(const VoxelGrid& grid, std::default_random_engine& generator)
 {
-    auto& grid = *set.grids.inside;
-    assert(numSpheres <= grid.numFilledVoxels());
-
     aabb3 bounds = grid.gridBounds();
     std::uniform_real_distribution<float> uniformInGridX { bounds.min.x, bounds.max.x };
     std::uniform_real_distribution<float> uniformInGridY { bounds.min.y, bounds.max.y };
     std::uniform_real_distribution<float> uniformInGridZ { bounds.min.z, bounds.max.z };
 
+    vec3 location;
+    ivec3 gridCoord;
+
+    do {
+        location = { uniformInGridX(generator),
+                     uniformInGridY(generator),
+                     uniformInGridZ(generator) };
+        gridCoord = grid.remapToGridSpace(location, std::round);
+    } while (grid.get(gridCoord) == 0);
+
+    return location;
+}
+
+void assignSpheresRandomlyInVolume(SphereSet& set, unsigned numSpheres)
+{
+    auto& grid = *set.grids.inside;
+    assert(numSpheres <= grid.numFilledVoxels());
+
     unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
     std::default_random_engine generator { seed };
+
+    for (size_t i = 0; i < numSpheres; ++i) {
+        vec3 location = getRandomSphereLocationInsideMesh(grid, generator);
+        Sphere sphere { location, 0.0 };
+        set.spheres.push_back(sphere);
+    }
+
+    aabb3 bounds = grid.gridBounds();
+    std::uniform_real_distribution<float> uniformInGridX { bounds.min.x, bounds.max.x };
+    std::uniform_real_distribution<float> uniformInGridY { bounds.min.y, bounds.max.y };
+    std::uniform_real_distribution<float> uniformInGridZ { bounds.min.z, bounds.max.z };
 
     while (set.spheres.size() < numSpheres) {
 
@@ -370,6 +396,21 @@ void sphereFitting(SphereSet& set)
     }
 }
 
+vec3 randomPointInSphere(const Sphere& sphere)
+{
+    std::uniform_real_distribution<double> randomOffset { -sphere.radius, +sphere.radius };
+
+    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+    std::default_random_engine generator { seed };
+
+    vec3 offset;
+    do {
+        offset = { randomOffset(generator), randomOffset(generator), randomOffset(generator) };
+    } while (length(offset) > sphere.radius);
+
+    return sphere.origin + offset;
+}
+
 void sphereTeleportation(SphereSet& set)
 {
     if (set.spheres.size() == 1) {
@@ -378,8 +419,22 @@ void sphereTeleportation(SphereSet& set)
         return;
     }
 
-    // TODO: Implement a sphere teleportation strategy for more than >1 spheres
-    assert(false);
+    std::sort(set.spheres.begin(), set.spheres.end(), [](const Sphere& lhs, const Sphere& rhs) {
+        return lhs.radius < rhs.radius;
+    });
+
+    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+    std::default_random_engine generator { seed };
+
+    size_t numToReplace = std::ceil(set.spheres.size() / 2.0);
+    for (size_t i = 0; i < numToReplace; ++i) {
+
+        Sphere& sphere = set.spheres[i];
+        sphere.origin = getRandomSphereLocationInsideMesh(*set.grids.inside, generator);
+
+        // NOTE: A sphere expansion will happen after this is done, so we don't need to take care of that now
+        sphere.radius = 0.0;
+    }
 }
 
 void generateOutput(const SphereSet& sphereSet)
@@ -421,12 +476,12 @@ int main(int argc, char** argv)
 {
     setApplicationWorkingDirectory(argv[0], "ProxyGen");
 
-    //std::string path = "assets/Bunny/bunny_lowres.gltf";
+    std::string path = "assets/Bunny/bunny_lowres.gltf";
     //std::string path = "assets/Avocado/Avocado.gltf";
-    std::string path = "assets/Sphere/sphere.gltf";
+    //std::string path = "assets/Sphere/sphere.gltf";
     //std::string path = "assets/BoomBox/BoomBoxWithAxes.gltf";
 
-    constexpr unsigned numSpheres = 1;
+    constexpr unsigned numSpheres = 10;
     const size_t gridDimensions = 64;
 
     fmt::print("=> loading model '{}'\n", path);
@@ -460,11 +515,6 @@ int main(int argc, char** argv)
 
     fmt::print("=> optimizing begin\n");
 
-    Sphere targetSphere;
-    targetSphere.origin = { 0, 0, 0 };
-    targetSphere.radius = 1.0;
-    fmt::print("OPTIMAL SPHERE VOLUME: {}\n", targetSphere.volume());
-
     bool didJustTeleport = false;
     double previousVolume = -std::numeric_limits<double>::infinity();
 
@@ -488,7 +538,7 @@ int main(int argc, char** argv)
         }
 
         if (newVolume > previousVolume) {
-            fmt::print("===> sphere fitting");
+            fmt::print("===> sphere fitting\n");
             sphereFitting(set);
         } else {
             fmt::print("===> sphere teleportation\n");
