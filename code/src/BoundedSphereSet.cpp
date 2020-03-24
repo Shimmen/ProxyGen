@@ -457,7 +457,7 @@ void sphereTeleportation(SphereSet& set)
     unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
     std::default_random_engine generator { seed };
 
-    size_t numToReplace = std::floor(set.spheres.size() / 4.0);
+    size_t numToReplace = std::ceil(set.spheres.size() / 4.0);
     for (size_t i = 0; i < numToReplace; ++i) {
 
         Sphere& sphere = set.spheres[i];
