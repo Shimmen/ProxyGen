@@ -576,8 +576,12 @@ int main(int argc, char** argv)
     double bestVolume = std::numeric_limits<double>::min();
     std::vector<Sphere> bestSolution {};
 
-    constexpr int maxIterations = 1000;
+    constexpr int maxIterations = 10'000;
+    constexpr int maxReverts = 100;
+
     int iteration = 0;
+    int numReverts = 0;
+
     for (; iteration < maxIterations; ++iteration) {
 
         fmt::print("==> expanding spheres\n");
@@ -595,9 +599,15 @@ int main(int argc, char** argv)
             if (newVolume <= previousVolume) {
                 // TODO: Maybe consider calling assignSpheresRandomlyInVolume K times (i.e. restart) a few times before giving up!
                 // If teleportation fails to increase volume, the algorithm terminates
-                fmt::print("==> teleportation failed to increase volume, reverting to known good solution\n");
-                set.spheres = bestSolution;
-                //break;
+                fmt::print("==> teleportation failed to increase volume, ");
+                if (numReverts < maxReverts) {
+                    fmt::print("reverting to known good solution\n");
+                    set.spheres = bestSolution;
+                    numReverts += 1;
+                } else {
+                    fmt::print("and max reverts reached, so aborting\n");
+                    break;
+                }
             }
         }
 
@@ -611,10 +621,20 @@ int main(int argc, char** argv)
         }
 
         previousVolume = newVolume;
+
+        if (iteration % 100 == 0) {
+            double itDone = 100.0 * double(iteration) / double(maxIterations);
+            double revDone = 100.0 * double(numReverts) / double(maxReverts);
+            fmt::print("==> {} iterations done ({:.1f}% it, {:.1f}% rev.)\n", iteration, itDone, revDone);
+        }
     }
 
     if (iteration == maxIterations) {
         fmt::print("==> max iterations reached\n");
+    }
+
+    if (numReverts == maxReverts) {
+        fmt::print("==> max reverts reached\n");
     }
 
     fmt::print("=> optimizing done\n");
