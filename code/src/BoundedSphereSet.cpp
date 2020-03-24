@@ -11,6 +11,8 @@
 #include <vector>
 
 #ifdef WIN32
+#define NOMINMAX
+#include <windows.h>
 #include <direct.h>
 #else
 #include <unistd.h>
@@ -104,6 +106,20 @@ void assignSpheresRandomlyInVolume(SphereSet& set, unsigned numSpheres)
     }
 }
 
+bool pointInsideTriangle(vec3 p, vec3 a, vec3 b, vec3 c)
+{
+    vec3 v0 = b - a, v1 = c - a, v2 = p - a;
+    float d00 = dot(v0, v0);
+    float d01 = dot(v0, v1);
+    float d11 = dot(v1, v1);
+    float d20 = dot(v2, v0);
+    float d21 = dot(v2, v1);
+    float denom = d00 * d11 - d01 * d01;
+    float v = (d11 * d20 - d01 * d21) / denom;
+    float w = (d00 * d21 - d01 * d20) / denom;
+    return (v + w) <= 1.0f;
+}
+
 bool sphereInsideMeshVolume(const Sphere& sphere, const SimpleMesh& mesh)
 {
     // NOTE: Implicit, but this assumes that the mesh is one solid blob with no islands!
@@ -132,15 +148,32 @@ bool sphereInsideMeshVolume(const Sphere& sphere, const SimpleMesh& mesh)
             continue;
         }
 
-        // Is the sphere fully behind the triangle? Since its center also it we then
+        // Is the sphere fully behind the triangle? Since its center also is we then
         // know this triangle isn't a problem here.
         if (h + sphere.radius < 0.0) {
             continue;
         }
 
-        // We know that we are behind the triangle and that the sphere pokes through, so
-        // the sphere is *not* inside the mesh volume.
-        return false;
+        // We know that we are behind the triangle and that the sphere pokes through the *plane of the triangle*
+        // but we don't know if we intersect the triangle at all, still, so we need to check that too.
+
+        // Check if any of the vertices of the triangle are inside the sphere
+        double r2 = sphere.radius * sphere.radius;
+        if (distance2(sphere.origin, v0) < r2) {
+            return false;
+        }
+        if (distance2(sphere.origin, v1) < r2) {
+            return false;
+        }
+        if (distance2(sphere.origin, v2) < r2) {
+            return false;
+        }
+
+        // Check if the sphere origin projected on the plane lies in the triangle
+        vec3 p = sphere.origin - triangle.normal * (float)h;
+        if (pointInsideTriangle(p, v0, v1, v2)) {
+            return false;
+        }
     }
 
     return true;
@@ -230,9 +263,7 @@ double sphereSetUnionVolume(const SphereSet& set)
 
     // TODO: Maybe scale down the intersection a bit, since we know it overestimates?
     double intersectionOverestimation = sphereSetIntersectionVolumeOverestimation(set);
-    //assert(intersectionOverestimation < volume); (doesn't hold!)
-
-    volume -= intersectionOverestimation;
+    volume -= 0.5 * intersectionOverestimation;
 
     return volume;
 }
@@ -426,7 +457,7 @@ void sphereTeleportation(SphereSet& set)
     unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
     std::default_random_engine generator { seed };
 
-    size_t numToReplace = std::ceil(set.spheres.size() / 2.0);
+    size_t numToReplace = std::floor(set.spheres.size() / 4.0);
     for (size_t i = 0; i < numToReplace; ++i) {
 
         Sphere& sphere = set.spheres[i];
@@ -437,18 +468,42 @@ void sphereTeleportation(SphereSet& set)
     }
 }
 
+double aabbVolume(const aabb3& aabb)
+{
+    glm::vec<3, double> dims = aabb.max - aabb.min;
+    return dims.x * dims.y * dims.z;
+}
+
 void generateOutput(const SphereSet& sphereSet)
 {
     size_t sphereCount = sphereSet.spheres.size();
 
-    fmt::print("const vec4 spheres[] = vec4[](\n");
+    std::string result = "const vec4 spheres[] = vec4[](\n";
     for (size_t i = 0; i < sphereCount; ++i) {
         const Sphere& sphere = sphereSet.spheres[i];
-        fmt::print("\tvec4({}, {}, {}, {}){}\n",
-                   sphere.origin.x, sphere.origin.y, sphere.origin.z,
-                   sphere.radius, (i + 1 == sphereCount) ? "" : ",");
+        std::string line = fmt::format("\tvec4({}, {}, {}, {}){}\n",
+                                       sphere.origin.x, sphere.origin.y, sphere.origin.z,
+                                       sphere.radius, (i + 1 == sphereCount) ? "" : ",");
+        result += line;
     }
-    fmt::print(");\n");
+    result += ");\n";
+
+    fmt::print(result);
+
+#ifdef WIN32
+    OpenClipboard(0);
+    EmptyClipboard();
+    HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, result.size() + 1);
+    if (!hg) {
+        CloseClipboard();
+        return;
+    }
+    memcpy(GlobalLock(hg), result.c_str(), result.size());
+    GlobalUnlock(hg);
+    SetClipboardData(CF_TEXT, hg);
+    CloseClipboard();
+    GlobalFree(hg);
+#endif
 }
 
 void setApplicationWorkingDirectory(char* executableName, const std::string& workingDir)
@@ -476,12 +531,12 @@ int main(int argc, char** argv)
 {
     setApplicationWorkingDirectory(argv[0], "ProxyGen");
 
-    std::string path = "assets/Bunny/bunny_lowres.gltf";
+    //std::string path = "assets/Bunny/bunny_lowres.gltf";
     //std::string path = "assets/Avocado/Avocado.gltf";
-    //std::string path = "assets/Sphere/sphere.gltf";
+    std::string path = "assets/Sphere/capsule.gltf";
     //std::string path = "assets/BoomBox/BoomBoxWithAxes.gltf";
 
-    constexpr unsigned numSpheres = 10;
+    constexpr unsigned numSpheres = 20;
     const size_t gridDimensions = 64;
 
     fmt::print("=> loading model '{}'\n", path);
@@ -518,6 +573,9 @@ int main(int argc, char** argv)
     bool didJustTeleport = false;
     double previousVolume = -std::numeric_limits<double>::infinity();
 
+    double bestVolume = std::numeric_limits<double>::min();
+    std::vector<Sphere> bestSolution {};
+
     constexpr int maxIterations = 1000;
     int iteration = 0;
     for (; iteration < maxIterations; ++iteration) {
@@ -527,13 +585,19 @@ int main(int argc, char** argv)
         double newVolume = sphereSetUnionVolume(set);
         fmt::print("   volume: {}\n", newVolume);
 
+        if (newVolume > bestVolume) {
+            bestVolume = newVolume;
+            bestSolution = set.spheres;
+        }
+
         if (didJustTeleport) {
             didJustTeleport = false;
             if (newVolume <= previousVolume) {
                 // TODO: Maybe consider calling assignSpheresRandomlyInVolume K times (i.e. restart) a few times before giving up!
                 // If teleportation fails to increase volume, the algorithm terminates
-                fmt::print("==> teleportation failed to increase volume\n");
-                break;
+                fmt::print("==> teleportation failed to increase volume, reverting to known good solution\n");
+                set.spheres = bestSolution;
+                //break;
             }
         }
 
@@ -555,6 +619,7 @@ int main(int argc, char** argv)
 
     fmt::print("=> optimizing done\n");
 
-    fmt::print("=> generating sphere output\n");
+    fmt::print("=> generating sphere output with volume {} (AABB volume {})\n", bestVolume, aabbVolume(meshBounds));
+    set.spheres = bestSolution;
     generateOutput(set);
 }
