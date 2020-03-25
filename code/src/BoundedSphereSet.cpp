@@ -106,8 +106,7 @@ void assignSpheresRandomlyInVolume(SphereSet& set, unsigned numSpheres)
     }
 }
 
-
-bool sphereTriangleIntersection(const Sphere& sphere, const Triangle& triangle)
+bool sphereTriangleIntersection(const Sphere& sphere, const vec3& v0, const vec3& v1, const vec3& v2)
 {
     // From https://realtimecollisiondetection.net/blog/?p=103
 
@@ -115,9 +114,9 @@ bool sphereTriangleIntersection(const Sphere& sphere, const Triangle& triangle)
     float r = sphere.radius;
     float rr = r * r;
 
-    vec3 A = triangle.v[0] - P;
-    vec3 B = triangle.v[1] - P;
-    vec3 C = triangle.v[2] - P;
+    vec3 A = v0 - P;
+    vec3 B = v1 - P;
+    vec3 C = v2 - P;
 
     vec3 V = cross(B - A, C - A);
     float d = dot(A, V);
@@ -168,7 +167,9 @@ bool sphereInsideMeshVolume(const Sphere& sphere, const SimpleMesh& mesh)
     // NOTE: Implicit, but this assumes that the mesh is one solid blob with no islands!
 
     // NOTE: To avoid expensive(/not-implemented) checks to see if the sphere centers are inside the volume
-    //  of the object, we will assume they are and through other means verify that it will be invariant.
+    //  of the object, we will assume they are and through other means verify that it will be invariant. The
+    //  other means are: 1) spawning points inside the volume, and 2) always making steps small enough that
+    //  we wont leave the volume when optimizing.
 
     if (sphere.radius == 0.0) {
         return true;
@@ -180,9 +181,8 @@ bool sphereInsideMeshVolume(const Sphere& sphere, const SimpleMesh& mesh)
         // TODO: Maybe don't reconstruct these every query?!
         vec3 v0, v1, v2;
         mesh.triangle(i, v0, v1, v2);
-        Triangle triangle { v0, v1, v2 };
 
-        if (sphereTriangleIntersection(sphere, triangle)) {
+        if (sphereTriangleIntersection(sphere, v0, v1, v2)) {
             return false;
         }
     }
@@ -274,7 +274,7 @@ double sphereSetUnionVolume(const SphereSet& set)
 
     // TODO: Maybe scale down the intersection a bit, since we know it overestimates?
     double intersectionOverestimation = sphereSetIntersectionVolumeOverestimation(set);
-    volume -= 0.5 * intersectionOverestimation;
+    volume -= 0.25 * intersectionOverestimation;
 
     return volume;
 }
@@ -485,7 +485,7 @@ double aabbVolume(const aabb3& aabb)
     return dims.x * dims.y * dims.z;
 }
 
-void generateOutput(const SphereSet& sphereSet)
+void generateOutput(const SphereSet& sphereSet, bool doPrint = true)
 {
     size_t sphereCount = sphereSet.spheres.size();
 
@@ -499,7 +499,9 @@ void generateOutput(const SphereSet& sphereSet)
     }
     result += ");\n";
 
-    fmt::print(result);
+    if (doPrint) {
+        fmt::print(result);
+    }
 
 #ifdef WIN32
     OpenClipboard(0);
@@ -542,13 +544,13 @@ int main(int argc, char** argv)
 {
     setApplicationWorkingDirectory(argv[0], "ProxyGen");
 
-    std::string path = "assets/Bunny/bunny_lowres.gltf";
+    std::string path = "assets/Bunny/bunny.gltf";
     //std::string path = "assets/Avocado/Avocado.gltf";
     //std::string path = "assets/Sphere/capsule.gltf";
     //std::string path = "assets/Sphere/double_sphere.gltf";
     //std::string path = "assets/BoomBox/BoomBoxWithAxes.gltf";
 
-    constexpr unsigned numSpheres = 30;
+    constexpr unsigned numSpheres = 15;
     const size_t gridDimensions = 64;
 
     fmt::print("=> loading model '{}'\n", path);
@@ -588,11 +590,11 @@ int main(int argc, char** argv)
     double bestVolume = std::numeric_limits<double>::min();
     std::vector<Sphere> bestSolution {};
 
-    constexpr int maxIterations = 10'000;
-    constexpr int maxReverts = 100;
+    constexpr int maxConsecutiveReverts = 3;
+    int numConsecutiveReverts = 0;
 
+    constexpr int maxIterations = 10'000;
     int iteration = 0;
-    int numReverts = 0;
 
     for (; iteration < maxIterations; ++iteration) {
 
@@ -606,28 +608,29 @@ int main(int argc, char** argv)
             bestSolution = set.spheres;
         }
 
-        if (didJustTeleport) {
+        if (newVolume > previousVolume) {
+
+            fmt::print("===> sphere fitting\n");
+            sphereFitting(set);
+
             didJustTeleport = false;
-            if (newVolume <= previousVolume) {
-                // TODO: Maybe consider calling assignSpheresRandomlyInVolume K times (i.e. restart) a few times before giving up!
-                // If teleportation fails to increase volume, the algorithm terminates
+            numConsecutiveReverts = 0;
+
+        } else {
+
+            if (didJustTeleport) {
                 fmt::print("==> teleportation failed to increase volume, ");
-                if (numReverts < maxReverts) {
+                if (numConsecutiveReverts < maxConsecutiveReverts) {
                     fmt::print("reverting to known good solution\n");
                     set.spheres = bestSolution;
-                    numReverts += 1;
-                    continue;
+                    numConsecutiveReverts += 1;
+                    //continue; (no, we have to teleport from this new stage first!)
                 } else {
                     fmt::print("and max reverts reached, so aborting\n");
                     break;
                 }
             }
-        }
 
-        if (newVolume > previousVolume) {
-            fmt::print("===> sphere fitting\n");
-            sphereFitting(set);
-        } else {
             fmt::print("===> sphere teleportation\n");
             sphereTeleportation(set);
             didJustTeleport = true;
@@ -635,10 +638,10 @@ int main(int argc, char** argv)
 
         previousVolume = newVolume;
 
-        if (iteration % 100 == 0) {
+        if (iteration % 10 == 0) {
             double itDone = 100.0 * double(iteration) / double(maxIterations);
-            double revDone = 100.0 * double(numReverts) / double(maxReverts);
-            fmt::print("==> {} iterations done ({:.1f}% it, {:.1f}% rev.)\n", iteration, itDone, revDone);
+            fmt::print("==> {} iterations done ({:.1f}%)\n", iteration, itDone);
+            generateOutput(set, false);
         }
     }
 
@@ -646,8 +649,8 @@ int main(int argc, char** argv)
         fmt::print("==> max iterations reached\n");
     }
 
-    if (numReverts == maxReverts) {
-        fmt::print("==> max reverts reached\n");
+    if (numConsecutiveReverts == maxConsecutiveReverts) {
+        fmt::print("==> max consectutive reverts reached\n");
     }
 
     fmt::print("=> optimizing done\n");
