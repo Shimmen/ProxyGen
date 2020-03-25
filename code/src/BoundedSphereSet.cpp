@@ -12,8 +12,8 @@
 
 #ifdef WIN32
 #define NOMINMAX
-#include <windows.h>
 #include <direct.h>
+#include <windows.h>
 #else
 #include <unistd.h>
 #endif
@@ -106,18 +106,61 @@ void assignSpheresRandomlyInVolume(SphereSet& set, unsigned numSpheres)
     }
 }
 
-bool pointInsideTriangle(vec3 p, vec3 a, vec3 b, vec3 c)
+
+bool sphereTriangleIntersection(const Sphere& sphere, const Triangle& triangle)
 {
-    vec3 v0 = b - a, v1 = c - a, v2 = p - a;
-    float d00 = dot(v0, v0);
-    float d01 = dot(v0, v1);
-    float d11 = dot(v1, v1);
-    float d20 = dot(v2, v0);
-    float d21 = dot(v2, v1);
-    float denom = d00 * d11 - d01 * d01;
-    float v = (d11 * d20 - d01 * d21) / denom;
-    float w = (d00 * d21 - d01 * d20) / denom;
-    return (v + w) <= 1.0f;
+    // From https://realtimecollisiondetection.net/blog/?p=103
+
+    vec3 P = sphere.origin;
+    float r = sphere.radius;
+    float rr = r * r;
+
+    vec3 A = triangle.v[0] - P;
+    vec3 B = triangle.v[1] - P;
+    vec3 C = triangle.v[2] - P;
+
+    vec3 V = cross(B - A, C - A);
+    float d = dot(A, V);
+    float e = dot(V, V);
+    bool sep1 = d * d > rr * e;
+
+    float aa = dot(A, A);
+    float ab = dot(A, B);
+    float ac = dot(A, C);
+    float bb = dot(B, B);
+    float bc = dot(B, C);
+    float cc = dot(C, C);
+
+    bool sep2 = (aa > rr) & (ab > aa) & (ac > aa);
+    bool sep3 = (bb > rr) & (ab > bb) & (bc > bb);
+    bool sep4 = (cc > rr) & (ac > cc) & (bc > cc);
+
+    vec3 AB = B - A;
+    vec3 BC = C - B;
+    vec3 CA = A - C;
+
+    float d1 = ab - aa;
+    float d2 = bc - bb;
+    float d3 = ac - cc;
+
+    float e1 = dot(AB, AB);
+    float e2 = dot(BC, BC);
+    float e3 = dot(CA, CA);
+
+    vec3 Q1 = A * e1 - d1 * AB;
+    vec3 Q2 = B * e2 - d2 * BC;
+    vec3 Q3 = C * e3 - d3 * CA;
+
+    vec3 QC = C * e1 - Q1;
+    vec3 QA = A * e2 - Q2;
+    vec3 QB = B * e3 - Q3;
+
+    bool sep5 = (dot(Q1, Q1) > rr * e1 * e1) && (dot(Q1, QC) > 0);
+    bool sep6 = (dot(Q2, Q2) > rr * e2 * e2) && (dot(Q2, QA) > 0);
+    bool sep7 = (dot(Q3, Q3) > rr * e3 * e3) && (dot(Q3, QB) > 0);
+
+    bool separated = sep1 | sep2 | sep3 | sep4 | sep5 | sep6 | sep7;
+    return !separated;
 }
 
 bool sphereInsideMeshVolume(const Sphere& sphere, const SimpleMesh& mesh)
@@ -139,39 +182,7 @@ bool sphereInsideMeshVolume(const Sphere& sphere, const SimpleMesh& mesh)
         mesh.triangle(i, v0, v1, v2);
         Triangle triangle { v0, v1, v2 };
 
-        double h = dot(triangle.normal, sphere.origin - v0);
-
-        // Is the sphere center in front of the triangle? Since we know that sphere
-        // centers always should be inside the volume, this simply means that the
-        // mesh is convex and we can ignore this triangle for this sphere.
-        if (h > 0.0) {
-            continue;
-        }
-
-        // Is the sphere fully behind the triangle? Since its center also is we then
-        // know this triangle isn't a problem here.
-        if (h + sphere.radius < 0.0) {
-            continue;
-        }
-
-        // We know that we are behind the triangle and that the sphere pokes through the *plane of the triangle*
-        // but we don't know if we intersect the triangle at all, still, so we need to check that too.
-
-        // Check if any of the vertices of the triangle are inside the sphere
-        double r2 = sphere.radius * sphere.radius;
-        if (distance2(sphere.origin, v0) < r2) {
-            return false;
-        }
-        if (distance2(sphere.origin, v1) < r2) {
-            return false;
-        }
-        if (distance2(sphere.origin, v2) < r2) {
-            return false;
-        }
-
-        // Check if the sphere origin projected on the plane lies in the triangle
-        vec3 p = sphere.origin - triangle.normal * (float)h;
-        if (pointInsideTriangle(p, v0, v1, v2)) {
+        if (sphereTriangleIntersection(sphere, triangle)) {
             return false;
         }
     }
@@ -457,7 +468,7 @@ void sphereTeleportation(SphereSet& set)
     unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
     std::default_random_engine generator { seed };
 
-    size_t numToReplace = std::ceil(set.spheres.size() / 4.0);
+    size_t numToReplace = std::ceil(set.spheres.size() / 8.0);
     for (size_t i = 0; i < numToReplace; ++i) {
 
         Sphere& sphere = set.spheres[i];
@@ -531,12 +542,13 @@ int main(int argc, char** argv)
 {
     setApplicationWorkingDirectory(argv[0], "ProxyGen");
 
-    //std::string path = "assets/Bunny/bunny_lowres.gltf";
+    std::string path = "assets/Bunny/bunny_lowres.gltf";
     //std::string path = "assets/Avocado/Avocado.gltf";
-    std::string path = "assets/Sphere/capsule.gltf";
+    //std::string path = "assets/Sphere/capsule.gltf";
+    //std::string path = "assets/Sphere/double_sphere.gltf";
     //std::string path = "assets/BoomBox/BoomBoxWithAxes.gltf";
 
-    constexpr unsigned numSpheres = 20;
+    constexpr unsigned numSpheres = 30;
     const size_t gridDimensions = 64;
 
     fmt::print("=> loading model '{}'\n", path);
@@ -604,6 +616,7 @@ int main(int argc, char** argv)
                     fmt::print("reverting to known good solution\n");
                     set.spheres = bestSolution;
                     numReverts += 1;
+                    continue;
                 } else {
                     fmt::print("and max reverts reached, so aborting\n");
                     break;
