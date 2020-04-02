@@ -3,6 +3,7 @@
 #include "SimpleMesh.h"
 #include "Sphere.h"
 #include "mathkit.h"
+#include <functional>
 #include <unordered_map>
 #include <vector>
 
@@ -16,6 +17,13 @@ public:
     ivec3 gridDimensions() const;
     aabb3 gridBounds() const;
     vec3 voxelSize() const;
+
+    struct TriangleRef {
+        const SimpleMesh& mesh;
+        uint64_t triangleIndex;
+    };
+
+    void forEachFilledVoxel(std::function<void(aabb3 aabb, const std::vector<TriangleRef>&)>) const;
 
     [[nodiscard]] size_t numFilledVoxels() const;
     [[nodiscard]] std::vector<vec3> filledVoxelsInSphere(const Sphere& sphere) const;
@@ -31,7 +39,7 @@ public:
     std::vector<ivec3> immediateFilledNeighbors(ivec3) const;
 
     void insertMesh(const SimpleMesh&, bool assignVoxelColorsToSurface);
-    void fillVolumes(const std::vector<SimpleMesh>&);
+    void fillVolumes();
     void subtractGrid(const VoxelGrid&);
 
     void quantizeColors(uint32_t numBins);
@@ -44,9 +52,5 @@ private:
     std::vector<uint32_t> m_grid;
     std::vector<vec3> m_colors;
 
-    struct TriangleRef {
-        const SimpleMesh* mesh;
-        uint64_t triangleIndex;
-    };
     std::unordered_map<uint64_t, std::vector<TriangleRef>> m_trianglesForVoxelIndex {};
 };

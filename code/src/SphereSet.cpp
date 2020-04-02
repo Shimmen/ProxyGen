@@ -1090,7 +1090,7 @@ int main(int argc, char** argv)
     fmt::print("=> volume filling\n");
 
     VoxelGrid filledGrid = shellGrid;
-    filledGrid.fillVolumes(simpleMeshes);
+    filledGrid.fillVolumes();
 
     fmt::print("=> preprocessing sphere set\n");
     SphereSet sphereSet = preprocess(simpleMeshes, filledGrid, numSpheres);

@@ -6,6 +6,9 @@
 #include <bobyqa.h>
 #include <chrono>
 #include <fmt/format.h>
+#include <fstream>
+#include <iomanip>
+#include <json.hpp>
 #include <random>
 #include <unordered_set>
 #include <vector>
@@ -175,19 +178,21 @@ bool sphereInsideMeshVolume(const Sphere& sphere, const SimpleMesh& mesh)
         return true;
     }
 
-    size_t triangleCount = mesh.triangleCount();
-    for (size_t i = 0; i < triangleCount; ++i) {
+    volatile bool result = true;
+    #pragma omp parallel for shared(result)
+    for (int i = 0; i < mesh.triangleCount(); ++i) {
+        if (result) {
+            // TODO: Maybe don't reconstruct these every query?!
+            vec3 v0, v1, v2;
+            mesh.triangle(i, v0, v1, v2);
 
-        // TODO: Maybe don't reconstruct these every query?!
-        vec3 v0, v1, v2;
-        mesh.triangle(i, v0, v1, v2);
-
-        if (sphereTriangleIntersection(sphere, v0, v1, v2)) {
-            return false;
+            if (sphereTriangleIntersection(sphere, v0, v1, v2)) {
+                result = false;
+            }
         }
     }
 
-    return true;
+    return result;
 }
 
 bool sphereSetInsideMeshVolume(const SphereSet& set, const SimpleMesh& mesh)
@@ -205,7 +210,9 @@ void expandSpheresMaximally(SphereSet& set)
     aabb3 gridBounds = set.grids.shell->gridBounds();
     double gridDiameter = distance(gridBounds.min, gridBounds.max);
 
-    for (Sphere& sphere : set.spheres) {
+    #pragma omp parallel for
+    for (int i = 0; i < set.spheres.size(); ++i) {
+        Sphere& sphere = set.spheres[i];
 
         Sphere minSphere { sphere.origin, 0.0 };
         Sphere maxSphere { sphere.origin, gridDiameter };
@@ -485,6 +492,26 @@ double aabbVolume(const aabb3& aabb)
     return dims.x * dims.y * dims.z;
 }
 
+void generateJsonOutput(const SphereSet& sphereSet, const std::string& outPath)
+{
+    using namespace nlohmann;
+
+    json j;
+    j["proxy"] = "sphere-set";
+    j["spheres"] = {};
+
+    for (const Sphere& sphere : sphereSet.spheres) {
+        json jsonSphere = {
+            { "center", { sphere.origin.x, sphere.origin.y, sphere.origin.z } },
+            { "radius", sphere.radius }
+        };
+        j["spheres"].push_back(jsonSphere);
+    }
+
+    std::ofstream outstream(outPath);
+    outstream << std::setw(4) << j << std::endl;
+}
+
 void generateOutput(const SphereSet& sphereSet, bool doPrint = true)
 {
     size_t sphereCount = sphereSet.spheres.size();
@@ -544,14 +571,11 @@ int main(int argc, char** argv)
 {
     setApplicationWorkingDirectory(argv[0], "ProxyGen");
 
-    std::string path = "assets/Bunny/bunny.gltf";
-    //std::string path = "assets/Avocado/Avocado.gltf";
-    //std::string path = "assets/Sphere/capsule.gltf";
-    //std::string path = "assets/Sphere/double_sphere.gltf";
-    //std::string path = "assets/BoomBox/BoomBoxWithAxes.gltf";
+    std::string path = "assets/Sponza/glTF/Sponza.gltf";
+    std::string outPath = "assets/Sponza/sponza_spheres.json";
 
-    constexpr unsigned numSpheres = 15;
-    const size_t gridDimensions = 64;
+    constexpr unsigned numSpheres = 256;
+    const size_t gridDimensions = 126;
 
     fmt::print("=> loading model '{}'\n", path);
     auto [basePath, model] = GltfUtil::loadModel(path);
@@ -574,7 +598,7 @@ int main(int argc, char** argv)
     set.grids.shell->quantizeColors(10);
 
     set.grids.filled = std::make_unique<VoxelGrid>(*set.grids.shell);
-    set.grids.filled->fillVolumes({ mesh });
+    set.grids.filled->fillVolumes();
 
     set.grids.inside = std::make_unique<VoxelGrid>(*set.grids.filled);
     set.grids.inside->subtractGrid(*set.grids.shell);
@@ -657,5 +681,7 @@ int main(int argc, char** argv)
 
     fmt::print("=> generating sphere output with volume {} (AABB volume {})\n", bestVolume, aabbVolume(meshBounds));
     set.spheres = bestSolution;
+
     generateOutput(set);
+    generateJsonOutput(set, outPath);
 }

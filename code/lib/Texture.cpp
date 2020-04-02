@@ -22,7 +22,8 @@ Texture::~Texture()
 
 vec3 Texture::sample(vec2 uv) const
 {
-    uv = clamp(uv, vec2(0.0f), vec2(1.0f));
+    uv = vec2(std::max(0.0f, std::min(uv.x, 1.0f)),
+              std::max(0.0f, std::min(uv.y, 1.0f)));
 
     vec2 pixelCoords = uv * vec2(m_width - 1, m_height - 1);
     ivec2 nearest = round(pixelCoords);

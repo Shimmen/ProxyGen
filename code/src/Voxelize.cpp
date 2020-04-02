@@ -12,8 +12,8 @@ int main()
     std::string path = "../assets/Avocado/Avocado.gltf";
     std::string outfile = "../assets/Avocado.vox";
 #else
-    std::string path = "../assets/BoomBox/BoomBoxWithAxes.gltf";
-    std::string outfile = "../assets/BoomBox.vox";
+    std::string path = "assets/Sponza/glTF/Sponza.gltf";
+    std::string outfile = "assets/Sponza.vox";
 #endif
     size_t gridDimensions = 126;
 
@@ -37,7 +37,7 @@ int main()
     fmt::print("= color quantization done  =\n");
 
     fmt::print("= volume filling begin =\n");
-    grid.fillVolumes(simpleMeshes);
+    grid.fillVolumes();
     fmt::print("= volume filling done  =\n");
 
     grid.writeToVox(outfile);

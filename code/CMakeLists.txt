@@ -24,6 +24,12 @@ target_link_libraries(SphereSet PRIVATE nanoflann::nanoflann)
 target_compile_options(SphereSet PRIVATE ${PROXYGEN_WARNINGS})
 
 add_executable(BoundedSphereSet src/BoundedSphereSet.cpp)
+target_include_directories(BoundedSphereSet PUBLIC deps/nlohmann_json)
 target_link_libraries(BoundedSphereSet PRIVATE ProxyGenLib)
 target_link_libraries(BoundedSphereSet PRIVATE bobyqa)
-target_compile_options(BoundedSphereSet PRIVATE ${PROXYGEN_WARNINGS})
+target_compile_options(BoundedSphereSet PRIVATE ${PROXYGEN_WARNINGS} /openmp)
+
+add_executable(VoxelContours src/VoxelContours.cpp)
+target_link_libraries(VoxelContours PRIVATE ProxyGenLib)
+target_include_directories(VoxelContours PUBLIC deps/nlohmann_json)
+target_compile_options(VoxelContours PRIVATE ${PROXYGEN_WARNINGS} /openmp)

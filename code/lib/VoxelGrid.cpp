@@ -53,6 +53,35 @@ vec3 VoxelGrid::voxelSize() const
     return (m_bounds.max - m_bounds.min) / vec3(m_sx, m_sy, m_sz);
 }
 
+void VoxelGrid::forEachFilledVoxel(std::function<void(aabb3 aabb, const std::vector<TriangleRef>&)> callback) const
+{
+    vec3 voxelHalfSize = 0.5f * voxelSize();
+
+    for (size_t z = 0; z < m_sz; ++z) {
+        for (size_t y = 0; y < m_sy; ++y) {
+            for (size_t x = 0; x < m_sx; ++x) {
+
+                if (get(x, y, z) > 0) {
+
+                    uint64_t linearIdx = linearIndex(x, y, z);
+
+                    auto entry = m_trianglesForVoxelIndex.find(linearIdx);
+                    if (entry != m_trianglesForVoxelIndex.end()) {
+
+                        const std::vector<TriangleRef>& triRefs = entry->second;
+
+                        vec3 gridCenter = voxelCenterPoint({ x, y, z });
+                        vec3 min = gridCenter - voxelHalfSize;
+                        vec3 max = gridCenter + voxelHalfSize;
+
+                        callback({ min, max }, triRefs);
+                    }
+                }
+            }
+        }
+    }
+}
+
 size_t VoxelGrid::numFilledVoxels() const
 {
     size_t count = 0;
@@ -230,7 +259,7 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurfa
                         set(x, y, z, value);
 
                         uint64_t index = linearIndex(x, y, z);
-                        m_trianglesForVoxelIndex[index].push_back({ &mesh, ti });
+                        m_trianglesForVoxelIndex[index].push_back({ mesh, ti });
                     }
                 }
             }
@@ -238,7 +267,7 @@ void VoxelGrid::insertMesh(const SimpleMesh& mesh, bool assignVoxelColorsToSurfa
     }
 }
 
-void VoxelGrid::fillVolumes(const std::vector<SimpleMesh>& meshes)
+void VoxelGrid::fillVolumes()
 {
     const vec3 stepDirection = { 1, 0, 0 };
 
@@ -263,7 +292,7 @@ void VoxelGrid::fillVolumes(const std::vector<SimpleMesh>& meshes)
                 for (auto& [mesh, triangleIdx] : triangleRefs) {
 
                     vec3 v0, v1, v2;
-                    mesh->triangle(triangleIdx, v0, v1, v2);
+                    mesh.triangle(triangleIdx, v0, v1, v2);
 
                     vec3 triNormal = normalize(cross(v1 - v0, v2 - v0));
                     normal += triNormal;
