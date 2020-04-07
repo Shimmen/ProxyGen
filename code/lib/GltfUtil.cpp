@@ -10,7 +10,7 @@ mat4 GltfUtil::createMatrixForNode(const tinygltf::Node& node)
             : mathkit::translate(node.translation[0], node.translation[1], node.translation[2]);
         mat4 rotation = node.rotation.empty()
             ? mat4(1.0f)
-            : mathkit::rotate(quat(node.rotation[0], node.rotation[1], node.rotation[2], node.rotation[3]));
+            : mathkit::rotate(quat(node.rotation[3], vec3(node.rotation[0], node.rotation[1], node.rotation[2])));
         mat4 scale = node.scale.empty()
             ? mat4(1.0f)
             : mathkit::scale(node.scale[0], node.scale[1], node.scale[2]);
@@ -189,6 +189,6 @@ void GltfUtil::bakeDownModelToSimpleMeshes(const tinygltf::Model& model, const s
 
     for (int nodeIdx : scene.nodes) {
         auto& node = model.nodes[nodeIdx];
-        findMeshesRecursively(node, createMatrixForNode(node));
+        findMeshesRecursively(node, mat4(1.0f));
     }
 }
