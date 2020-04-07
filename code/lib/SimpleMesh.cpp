@@ -2,25 +2,23 @@
 
 #include <algorithm>
 
-SimpleMesh::SimpleMesh(std::vector<vec3>&& positions, std::vector<vec2>&& texcoords, std::vector<size_t>&& indices, std::optional<std::string> texturePath)
+SimpleMesh::SimpleMesh(std::vector<vec3>&& positions, std::vector<vec2>&& texcoords, std::vector<size_t>&& indices, Texture texture)
     : m_positions(positions)
     , m_texcoords(texcoords)
     , m_indices(indices)
+    , m_texture(texture)
 {
-    if (texturePath.has_value()) {
-        m_texture = Texture(texturePath.value());
-    }
 }
 
 bool SimpleMesh::hasTexture() const
 {
-    return m_texture.has_value();
+    return true;
 }
 
 const Texture& SimpleMesh::texture() const
 {
     assert(hasTexture());
-    return m_texture.value();
+    return m_texture;
 }
 
 size_t SimpleMesh::vertexCount() const

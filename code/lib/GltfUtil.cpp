@@ -161,19 +161,22 @@ std::string GltfUtil::baseColorTextureURI(const tinygltf::Model& model, const ti
 void GltfUtil::bakeDownModelToSimpleMeshes(const tinygltf::Model& model, const std::string& basePath, std::vector<SimpleMesh>& simpleMeshes)
 {
     std::function<void(const tinygltf::Node&, mat4)> findMeshesRecursively = [&](const tinygltf::Node& node, mat4 matrix) {
-        matrix = createMatrixForNode(node) * matrix;
+        matrix = matrix * createMatrixForNode(node);
 
         if (node.mesh != -1) {
             auto& mesh = model.meshes[node.mesh];
             for (auto& primitive : mesh.primitives) {
                 assert(primitive.mode == TINYGLTF_MODE_TRIANGLES);
 
-                std::optional<std::string> texturePath {};
-                std::string path = baseColorTextureURI(model, primitive);
-                if (path != "") {
-                    texturePath = basePath + path;
-                } 
-                simpleMeshes.emplace_back(bakedPositionData(model, primitive, matrix), texcoordData(model, primitive), indexData(model, primitive), texturePath);
+                if (baseColorTextureURI(model, primitive) != "") {
+                    std::string path = basePath + baseColorTextureURI(model, primitive);
+                    simpleMeshes.emplace_back(bakedPositionData(model, primitive, matrix), texcoordData(model, primitive), indexData(model, primitive), Texture(path));
+                } else {
+                    auto& material = model.materials[primitive.material];
+                    std::vector<double> c = material.pbrMetallicRoughness.baseColorFactor;
+                    vec4 color = vec4(c[0], c[1], c[2], c[3]);
+                    simpleMeshes.emplace_back(bakedPositionData(model, primitive, matrix), texcoordData(model, primitive), indexData(model, primitive), Texture(color));
+                }
             }
         }
 

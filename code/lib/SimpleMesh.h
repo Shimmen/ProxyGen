@@ -7,7 +7,7 @@
 
 class SimpleMesh {
 public:
-    SimpleMesh(std::vector<vec3>&& positions, std::vector<vec2>&& texcoords, std::vector<size_t>&& indices, std::optional<std::string> texturePath);
+    SimpleMesh(std::vector<vec3>&& positions, std::vector<vec2>&& texcoords, std::vector<size_t>&& indices, Texture texture);
 
     [[nodiscard]] bool hasTexture() const;
     [[nodiscard]] const Texture& texture() const;
@@ -28,5 +28,5 @@ private:
     std::vector<vec3> m_positions;
     std::vector<vec2> m_texcoords;
     std::vector<size_t> m_indices;
-    std::optional<Texture> m_texture;
+    Texture m_texture;
 };
