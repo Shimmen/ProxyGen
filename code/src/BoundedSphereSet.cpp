@@ -21,6 +21,18 @@
 #include <unistd.h>
 #endif
 
+struct SphericalHarmonics {
+    vec3 L00 {};
+    vec3 L11 {};
+    vec3 L10 {};
+    vec3 L1_1 {};
+    vec3 L21 {};
+    vec3 L2_1 {};
+    vec3 L2_2 {};
+    vec3 L20 {};
+    vec3 L22 {};
+};
+
 struct SphereSet {
     SphereSet(const SimpleMesh& mesh)
         : mesh(mesh)
@@ -28,6 +40,7 @@ struct SphereSet {
     }
 
     std::vector<Sphere> spheres;
+    std::vector<SphericalHarmonics> sphereSH;
 
     const SimpleMesh& mesh;
 
@@ -492,6 +505,145 @@ double aabbVolume(const aabb3& aabb)
     return dims.x * dims.y * dims.z;
 }
 
+std::optional<vec3> triangleRayIntersection(vec3 v0, vec3 v1, vec3 v2, vec3 rayOrigin, vec3 rayDirection, float& outT)
+{
+    // From GraphicsCodex
+
+    const vec3& e1 = v1 - v0;
+    const vec3& e2 = v2 - v0;
+
+    vec3 N = normalize(cross(e1, e2));
+
+    vec3 q = cross(rayDirection, e2);
+    float a = dot(e1, q);
+
+    // Close to the limit of precision?
+    if (fabsf(a) <= 1e-4f) {
+        return {};
+    }
+
+    const vec3& s = (rayOrigin - v0) / a;
+    const vec3& r = cross(s, e1);
+
+    // Barycentric coordinates
+    float b[3];
+    b[0] = dot(s, q);
+    b[1] = dot(r, rayDirection);
+    b[2] = 1.0f - b[0] - b[1];
+
+    // Intersected inside triangle?
+    float t = dot(e2, r);
+    if ((b[0] >= 0) && (b[1] >= 0) && (b[2] >= 0) && t >= 0) {
+
+        vec3 hitPoint = rayOrigin + t * rayDirection;
+
+        // TODO: This worked on a previous project... What's up with the order though?
+        vec3 barycentric { b[2], b[0], b[1] };
+
+        outT = t;
+        return barycentric;
+    }
+
+    return {};
+}
+
+vec3 raytraceMesh(const SimpleMesh& mesh, vec3 o, vec3 d)
+{
+    float closestT = INFINITE;
+    int64_t closestTriangle = -1;
+    vec3 closestBarycentric {};
+
+    for (size_t ti = 0; ti < mesh.triangleCount(); ++ti) {
+
+        vec3 v0, v1, v2;
+        mesh.triangle(ti, v0, v1, v2);
+
+        float t;
+        std::optional<vec3> bary = triangleRayIntersection(v0, v1, v2, o, d, t);
+
+        if (bary.has_value() && t < closestT) {
+            closestBarycentric = bary.value();
+            closestTriangle = ti;
+            closestT = t;
+        }
+    }
+
+    if (closestTriangle == -1) {
+        return vec3(0, 0, 0);
+    }
+
+    vec2 uv0, uv1, uv2;
+    mesh.triangleTexcoords(closestTriangle, uv0, uv1, uv2);
+
+    vec3 b = closestBarycentric;
+    vec2 uv = b[0] * uv0 + b[1] * uv1 + b[2] * uv2;
+
+    assert(mesh.hasTexture());
+    vec3 color = mesh.texture().sample(uv);
+
+    return color;
+}
+
+SphericalHarmonics generateSphericalHarmonics(vec3 sampleCenter, size_t numSamples, const SimpleMesh& mesh)
+{
+    SphericalHarmonics sh {};
+
+    std::mt19937_64 rng;
+    std::uniform_real_distribution<float> signedVal { -1.0f, +1.0f };
+
+    #pragma omp parallel for
+    for (int i = 0; i < numSamples; ++i) {
+
+        // Sample sphere uniformly
+        vec3 dir;
+        do {
+            dir.x = signedVal(rng);
+            dir.y = signedVal(rng);
+            dir.z = signedVal(rng);
+        } while (length2(dir) > 1.0f);
+        dir = normalize(dir);
+
+        vec3 L = raytraceMesh(mesh, sampleCenter, dir);
+
+        float Y00 = 0.282095f;
+        float Y11 = 0.488603f * dir.x;
+        float Y10 = 0.488603f * dir.z;
+        float Y1_1 = 0.488603f * dir.y;
+        float Y21 = 1.092548f * dir.x * dir.z;
+        float Y2_1 = 1.092548f * dir.y * dir.z;
+        float Y2_2 = 1.092548f * dir.y * dir.x;
+        float Y20 = 0.946176f * dir.z * dir.z - 0.315392f;
+        float Y22 = 0.546274f * (dir.x * dir.x - dir.y * dir.y);
+
+        #pragma omp critical
+        {
+            sh.L00 += L * Y00 / float(numSamples);
+            sh.L11 += L * Y11 / float(numSamples);
+            sh.L10 += L * Y10 / float(numSamples);
+            sh.L1_1 += L * Y1_1 / float(numSamples);
+            sh.L21 += L * Y21 / float(numSamples);
+            sh.L2_1 += L * Y2_1 / float(numSamples);
+            sh.L2_2 += L * Y2_2 / float(numSamples);
+            sh.L20 += L * Y20 / float(numSamples);
+            sh.L22 += L * Y22 / float(numSamples);
+        }
+    }
+
+    return sh;
+}
+
+std::vector<SphericalHarmonics> generateSphericalHarmonicsForSphereColors(const SphereSet& set, size_t numSamples)
+{
+    std::vector<SphericalHarmonics> SHs;
+
+    for (const Sphere& sphere : set.spheres) {
+        SphericalHarmonics sh = generateSphericalHarmonics(sphere.origin, numSamples, set.mesh);
+        SHs.push_back(sh);
+    }
+
+    return SHs;
+}
+
 void generateJsonOutput(const SphereSet& sphereSet, const std::string& outPath)
 {
     using namespace nlohmann;
@@ -500,10 +652,24 @@ void generateJsonOutput(const SphereSet& sphereSet, const std::string& outPath)
     j["proxy"] = "sphere-set";
     j["spheres"] = {};
 
-    for (const Sphere& sphere : sphereSet.spheres) {
+    for (size_t i = 0; i < sphereSet.spheres.size(); ++i) {
+
+        const Sphere& sphere = sphereSet.spheres[i];
+        const SphericalHarmonics& sh = sphereSet.sphereSH[i];
+
         json jsonSphere = {
             { "center", { sphere.origin.x, sphere.origin.y, sphere.origin.z } },
-            { "radius", sphere.radius }
+            { "radius", sphere.radius },
+            { "sh",
+              { { "L00", { sh.L00.x, sh.L00.y, sh.L00.z } },
+                { "L11", { sh.L11.x, sh.L11.y, sh.L11.z } },
+                { "L10", { sh.L10.x, sh.L10.y, sh.L10.z } },
+                { "L1_1", { sh.L1_1.x, sh.L1_1.y, sh.L1_1.z } },
+                { "L21", { sh.L21.x, sh.L21.y, sh.L21.z } },
+                { "L2_1", { sh.L2_1.x, sh.L2_1.y, sh.L2_1.z } },
+                { "L2_2", { sh.L2_2.x, sh.L2_2.y, sh.L2_2.z } },
+                { "L20", { sh.L20.x, sh.L20.y, sh.L20.z } },
+                { "L22", { sh.L22.x, sh.L22.y, sh.L22.z } } } }
         };
         j["spheres"].push_back(jsonSphere);
     }
@@ -571,11 +737,13 @@ int main(int argc, char** argv)
 {
     setApplicationWorkingDirectory(argv[0], "ProxyGen");
 
-    std::string path = "assets/Sponza/glTF/Sponza.gltf";
-    std::string outPath = "assets/Sponza/sponza_spheres.json";
+    std::string path = "assets/Barrel/barrel.gltf";
+    std::string outPath = "assets/Barrel/barrel_spheres.json";
 
-    constexpr unsigned numSpheres = 256;
+    constexpr unsigned numSpheres = 2;
     const size_t gridDimensions = 126;
+
+    constexpr size_t numShSamples = 4096;
 
     fmt::print("=> loading model '{}'\n", path);
     auto [basePath, model] = GltfUtil::loadModel(path);
@@ -681,6 +849,10 @@ int main(int argc, char** argv)
 
     fmt::print("=> generating sphere output with volume {} (AABB volume {})\n", bestVolume, aabbVolume(meshBounds));
     set.spheres = bestSolution;
+
+    fmt::print("=> generating SH color representations for spheres ({} samples)\n", numShSamples);
+    std::vector<SphericalHarmonics> SHs = generateSphericalHarmonicsForSphereColors(set, numShSamples);
+    set.sphereSH = SHs;
 
     generateOutput(set);
     generateJsonOutput(set, outPath);
