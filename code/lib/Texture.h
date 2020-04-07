@@ -6,6 +6,7 @@
 
 class Texture {
 public:
+    explicit Texture(vec4 color);
     explicit Texture(std::string path);
     ~Texture();
 

@@ -2,6 +2,19 @@
 
 #include <fmt/format.h>
 
+Texture::Texture(vec4 color)
+    : m_path()
+    , m_width(1)
+    , m_height(1)
+    , m_numComponents(4)
+{
+    m_pixels = (stbi_uc*)malloc(4 * sizeof(stbi_uc));
+    m_pixels[0] = 255.99f * color.x;
+    m_pixels[1] = 255.99f * color.y;
+    m_pixels[2] = 255.99f * color.z;
+    m_pixels[3] = 255.99f * color.w;
+}
+
 Texture::Texture(std::string path)
     : m_path(std::move(path))
 {
