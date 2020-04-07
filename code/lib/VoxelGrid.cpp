@@ -35,7 +35,7 @@ ivec3 VoxelGrid::remapToGridSpace(vec3 point, float (*roundingFunc)(float)) cons
 vec3 VoxelGrid::voxelCenterPoint(ivec3 gridCoord) const
 {
     const vec3 voxSize = voxelSize();
-    return vec3(gridCoord) * voxSize + (0.5f * voxSize);
+    return m_bounds.min + vec3(gridCoord) * voxSize + (0.5f * voxSize);
 }
 
 ivec3 VoxelGrid::gridDimensions() const
