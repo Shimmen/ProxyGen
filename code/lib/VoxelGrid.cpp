@@ -6,7 +6,23 @@
 #include <fstream>
 #include <sstream>
 
-#define MIN(a, b) ((a < b) ? a : b)
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
+
+glm::ivec3 sizeFromMaxAndBounds(uint32_t maxSize, aabb3 bounds)
+{
+    vec3 dims = bounds.max - bounds.min;
+    float maxDim = MAX(dims.x, MAX(dims.y, dims.z));
+    dims /= maxDim;
+
+    ivec3 size = dims * vec3(maxSize);
+    return size;
+}
+
+VoxelGrid::VoxelGrid(uint32_t maxSize, aabb3 bounds)
+    : VoxelGrid(sizeFromMaxAndBounds(maxSize, bounds), bounds)
+{
+}
 
 VoxelGrid::VoxelGrid(glm::ivec3 size, aabb3 bounds)
     : m_bounds(bounds)
@@ -453,8 +469,8 @@ void VoxelGrid::writeToVox(const std::string& path) const
 
     std::ostringstream sizeBuffer {};
     writeInt32(sizeBuffer, sx);
-    writeInt32(sizeBuffer, sy);
     writeInt32(sizeBuffer, sz);
+    writeInt32(sizeBuffer, sy);
 
     std::ostringstream xyziBuffer {};
     writeInt32(xyziBuffer, numFilledVoxels());

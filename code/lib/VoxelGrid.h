@@ -9,6 +9,7 @@
 
 class VoxelGrid {
 public:
+    VoxelGrid(uint32_t maxSize, aabb3 bounds);
     VoxelGrid(glm::ivec3 size, aabb3 bounds);
 
     ivec3 remapToGridSpace(vec3, float (*roundingFunc)(float)) const;
