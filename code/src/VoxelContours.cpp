@@ -55,44 +55,214 @@ struct Triangle {
     float area;
 };
 
-struct VoxelContour {
-    aabb3 aabb;
+struct Plane {
     vec3 normal;
-    float centerOffset;
-    //uint32_t colorIdx;
+    float distance;
 };
 
-VoxelContour createContourForSingleTriangle(aabb3 aabb, const Triangle& triangle)
+struct VoxelContour {
+    aabb3 aabb;
+    Plane plane;
+    uint32_t colorIdx;
+};
+
+bool triangleNormalsInSameHemisphere(const std::vector<Triangle>& triangles)
 {
-    // Project voxel center on the triangle (or at least the distance)
-    vec3 center = 0.5f * (aabb.min + aabb.max);
-    vec3 relPoint = center - triangle.v[0];
-    float triToCenterOffset = dot(relPoint, triangle.normal);
+    for (size_t i = 0; i < triangles.size(); ++i) {
+        const Triangle& ti = triangles[i];
+        for (size_t k = i + 1; k < triangles.size(); ++k) {
+            const Triangle& tk = triangles[k];
+            float a = dot(ti.normal, tk.normal);
+            if (a < 0.0f) {
+                return false;
+            }
+        }
+    }
 
-    VoxelContour contour {};
-    contour.aabb = aabb;
-    contour.normal = triangle.normal;
-    contour.centerOffset = -triToCenterOffset; // -1e-6f; (maybe give some margin too?)
+    return true;
+}
 
+std::optional<std::pair<float, float>> aabbRayIntersection(aabb3 aabb, vec3 rayOrigin, vec3 rayDirection)
+{
+    float tmin = (aabb.min.x - rayOrigin.x) / rayDirection.x;
+    float tmax = (aabb.max.x - rayOrigin.x) / rayDirection.x;
+
+    if (tmin > tmax)
+        std::swap(tmin, tmax);
+
+    float tymin = (aabb.min.y - rayOrigin.y) / rayDirection.y;
+    float tymax = (aabb.max.y - rayOrigin.y) / rayDirection.y;
+
+    if (tymin > tymax)
+        std::swap(tymin, tymax);
+
+    if ((tmin > tymax) || (tymin > tmax))
+        return {};
+
+    if (tymin > tmin)
+        tmin = tymin;
+
+    if (tymax < tmax)
+        tmax = tymax;
+
+    float tzmin = (aabb.min.z - rayOrigin.z) / rayDirection.z;
+    float tzmax = (aabb.max.z - rayOrigin.z) / rayDirection.z;
+
+    if (tzmin > tzmax)
+        std::swap(tzmin, tzmax);
+
+    if ((tmin > tzmax) || (tzmin > tmax))
+        return {};
+
+    if (tzmin > tmin)
+        tmin = tzmin;
+
+    if (tzmax < tmax)
+        tmax = tzmax;
+
+    return { { tmin, tmax } };
+}
+
+std::vector<vec3> aabbLineSegmentIntersection(aabb3 aabb, vec3 a, vec3 b)
+{
+    vec3 rayOrigin = a;
+    vec3 rayDirection = normalize(b - a);
+    float maxAllowedT = distance(a, b);
+
+    auto intersection = aabbRayIntersection(aabb, rayOrigin, rayDirection);
+
+    if (!intersection.has_value()) {
+        return {};
+    }
+
+    std::vector<vec3> points {};
+    auto& [tmin, tmax] = intersection.value();
+
+    if (tmin >= 0.0f && tmin <= maxAllowedT) {
+        points.push_back(rayOrigin + tmin * rayDirection);
+    }
+
+    if (tmax >= 0.0f && tmax <= maxAllowedT) {
+        points.push_back(rayOrigin + tmax * rayDirection);
+    }
+
+    return points;
+}
+
+std::vector<vec3> clipTriangleToInternalPoint(aabb3 aabb, const Triangle& triangle)
+{
+    glm::bvec3 inside = { aabb.contains(triangle.v[0]), aabb.contains(triangle.v[1]), aabb.contains(triangle.v[2]) };
+
+    std::vector<vec3> points {};
+
+    // Add all triangle vertices already inside the aabb
+    for (int i = 0; i < 3; ++i) {
+        if (inside[i]) {
+            points.push_back(triangle.v[i]);
+        }
+    }
+
+    if (all(inside)) {
+        return points;
+    }
+
+    for (int i = 0; i < 3; ++i) {
+
+        int iNext = (i + 1) % 3;
+        std::vector<vec3> ps = aabbLineSegmentIntersection(aabb, triangle.v[i], triangle.v[iNext]);
+        points.insert(points.end(), ps.begin(), ps.end());
+    }
+
+    return points;
+}
+
+VoxelContour createContourFromConsensusTriangles(aabb3 aabb, const std::vector<Triangle>& triangles)
+{
+    vec3 sharedNormal = vec3(0.0f);
+    for (auto& triangle : triangles) {
+        sharedNormal += triangle.normal;
+    }
+    sharedNormal = normalize(sharedNormal);
+
+    // Find the point furthest back along the shared normal
+    float minDistance = std::numeric_limits<float>::max();
+    for (auto& triangle : triangles) {
+        for (vec3 point : clipTriangleToInternalPoint(aabb, triangle)) {
+            float distance = dot(point, sharedNormal);
+            if (distance < minDistance) {
+                minDistance = distance;
+            }
+        }
+    }
+
+    Plane plane;
+    plane.normal = sharedNormal;
+    plane.distance = minDistance;
+
+    VoxelContour contour { aabb, plane };
     return contour;
 }
 
-void writeResult(const std::string& outPath, const std::vector<VoxelContour>& contours)
+VoxelContour createContourForSingleTriangle(aabb3 aabb, const Triangle& triangle)
+{
+    float distance = dot(triangle.v[0], triangle.normal);
+    Plane plane { triangle.normal, distance };
+
+    VoxelContour contour { aabb, plane };
+    return contour;
+}
+
+std::optional<VoxelContour> createContour(aabb3 aabb, const std::vector<VoxelGrid::TriangleRef>& refs)
+{
+    std::vector<Triangle> triangles;
+    for (auto& ref : refs) {
+        vec3 v0, v1, v2;
+        ref.mesh.triangle(ref.triangleIndex, v0, v1, v2);
+        triangles.emplace_back(v0, v1, v2);
+    }
+
+    if (triangles.size() == 1) {
+        return createContourForSingleTriangle(aabb, triangles.front());
+    }
+
+    if (triangleNormalsInSameHemisphere(triangles)) {
+        return createContourFromConsensusTriangles(aabb, triangles);
+    }
+
+    /*
+    static int numWithTwo = 0;
+    static int numWithConsensus = 0;
+    numWithTwo += 1;
+    numWithConsensus += triangleNormalsInSameHemisphere(triangles) ? 1 : 0;
+    fmt::print("       -> {}, consensus {}\n", numWithTwo, numWithConsensus);
+    */
+
+    return {};
+}
+
+void writeResult(const std::string& outPath, const std::vector<VoxelContour>& contours, const std::vector<vec3>& colors)
 {
     using namespace nlohmann;
 
     json j;
     j["proxy"] = "voxel-contours";
-    j["contours"] = {};
 
+    j["contours"] = {};
     for (const VoxelContour& contour : contours) {
         json jsonContour = {
             { "aabbMin", { contour.aabb.min.x, contour.aabb.min.y, contour.aabb.min.z } },
             { "aabbMax", { contour.aabb.max.x, contour.aabb.max.y, contour.aabb.max.z } },
-            { "normal", { contour.normal.x, contour.normal.y, contour.normal.z } },
-            { "centerOffset", contour.centerOffset }
+            { "normal", { contour.plane.normal.x, contour.plane.normal.y, contour.plane.normal.z } },
+            { "distance", contour.plane.distance },
+            { "colorIndex", contour.colorIdx }
         };
         j["contours"].push_back(jsonContour);
+    }
+
+    j["colors"] = {};
+    for (const vec3& color : colors) {
+        json jsonColor = { color.r, color.g, color.b };
+        j["colors"].push_back(jsonColor);
     }
 
     std::ofstream outstream(outPath);
@@ -104,9 +274,9 @@ int main(int argc, char** argv)
     setApplicationWorkingDirectory(argv[0], "ProxyGen");
 
 #if 1
-    std::string path = "assets/Bunny/bunny.gltf";
-    std::string outPath = "assets/Bunny/bunny_contours.json";
-    constexpr uint32_t gridDimensions = 64;
+    std::string path = "assets/Barrel/barrel.gltf";
+    std::string outPath = "assets/Barrel/barrel_contours.json";
+    constexpr uint32_t gridDimensions = 22;
 #else
     std::string path = "assets/Sponza/glTF/Sponza.gltf";
     std::string outPath = "assets/Sponza/sponza_contours.json";
@@ -123,7 +293,7 @@ int main(int argc, char** argv)
     fmt::print("=> creating voxel grid of resultion {}x{}x{}\n", gridDimensions, gridDimensions, gridDimensions);
 
     aabb3 meshBounds = SimpleMesh::calculateBounds(meshes);
-    VoxelGrid shell { glm::ivec3(gridDimensions), meshBounds };
+    VoxelGrid shell { gridDimensions, meshBounds };
 
     size_t triangleCount = 0;
     for (const SimpleMesh& mesh : meshes) {
@@ -142,33 +312,20 @@ int main(int argc, char** argv)
     std::vector<VoxelContour> contours {};
     size_t numIgnored = 0;
 
-    shell.forEachFilledVoxel([&](aabb3 aabb, const std::vector<VoxelGrid::TriangleRef>& triangles) {
-        if (triangles.size() == 1) {
-
-            auto ref = triangles.front();
-
-            vec3 v0, v1, v2;
-            ref.mesh.triangle(ref.triangleIndex, v0, v1, v2);
-
-            Triangle triangle { v0, v1, v2 };
-            VoxelContour contour = createContourForSingleTriangle(aabb, triangle);
+    shell.forEachFilledVoxel([&](aabb3 aabb, uint32_t value, const std::vector<VoxelGrid::TriangleRef>& triangles) {
+        auto maybeContour = createContour(aabb, triangles);
+        if (maybeContour.has_value()) {
+            VoxelContour contour = maybeContour.value();
+            contour.colorIdx = value - 1;
             contours.push_back(contour);
-
         } else {
-            // TODO: Implement this case!
             numIgnored += 1;
-
-            VoxelContour contour {};
-            contour.aabb = aabb;
-            contour.normal = vec3(0, 1, 0);
-            contour.centerOffset = 0.0f;
-            contours.push_back(contour);
         }
     });
 
     fmt::print("=> {} contours generator\n", contours.size());
     fmt::print("=> {} contours ignored\n", numIgnored);
 
-    writeResult(outPath, contours);
+    writeResult(outPath, contours, shell.colors());
     //shell.writeToVox(outPath);
 }

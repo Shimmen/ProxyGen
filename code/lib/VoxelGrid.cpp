@@ -69,7 +69,7 @@ vec3 VoxelGrid::voxelSize() const
     return (m_bounds.max - m_bounds.min) / vec3(m_sx, m_sy, m_sz);
 }
 
-void VoxelGrid::forEachFilledVoxel(std::function<void(aabb3 aabb, const std::vector<TriangleRef>&)> callback) const
+void VoxelGrid::forEachFilledVoxel(std::function<void(aabb3 aabb, uint32_t value, const std::vector<TriangleRef>&)> callback) const
 {
     vec3 voxelHalfSize = 0.5f * voxelSize();
 
@@ -77,7 +77,8 @@ void VoxelGrid::forEachFilledVoxel(std::function<void(aabb3 aabb, const std::vec
         for (size_t y = 0; y < m_sy; ++y) {
             for (size_t x = 0; x < m_sx; ++x) {
 
-                if (get(x, y, z) > 0) {
+                uint32_t value = get(x, y, z);
+                if (value > 0) {
 
                     uint64_t linearIdx = linearIndex(x, y, z);
 
@@ -90,7 +91,7 @@ void VoxelGrid::forEachFilledVoxel(std::function<void(aabb3 aabb, const std::vec
                         vec3 min = gridCenter - voxelHalfSize;
                         vec3 max = gridCenter + voxelHalfSize;
 
-                        callback({ min, max }, triRefs);
+                        callback({ min, max }, value, triRefs);
                     }
                 }
             }
@@ -417,7 +418,9 @@ void VoxelGrid::quantizeColors(uint32_t numBins)
 
         for (uint32_t k = 0; k < numBins; ++k) {
             AvgPair& avgPair = averagePairs[k];
-            clusters[k] = avgPair.sum / vec3(avgPair.count);
+            if (avgPair.count > 0) {
+                clusters[k] = avgPair.sum / vec3(avgPair.count);
+            }
         }
     }
 
@@ -436,6 +439,11 @@ void VoxelGrid::quantizeColors(uint32_t numBins)
     }
 
     m_colors = clusters;
+}
+
+const std::vector<vec3>& VoxelGrid::colors() const
+{
+    return m_colors;
 }
 
 void VoxelGrid::writeToVox(const std::string& path) const

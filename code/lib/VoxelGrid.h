@@ -24,7 +24,7 @@ public:
         uint64_t triangleIndex;
     };
 
-    void forEachFilledVoxel(std::function<void(aabb3 aabb, const std::vector<TriangleRef>&)>) const;
+    void forEachFilledVoxel(std::function<void(aabb3 aabb, uint32_t value, const std::vector<TriangleRef>&)>) const;
 
     [[nodiscard]] size_t numFilledVoxels() const;
     [[nodiscard]] std::vector<vec3> filledVoxelsInSphere(const Sphere& sphere) const;
@@ -44,6 +44,8 @@ public:
     void subtractGrid(const VoxelGrid&);
 
     void quantizeColors(uint32_t numBins);
+    const std::vector<vec3>& colors() const;
+
     void writeToVox(const std::string& path) const;
 
 private:

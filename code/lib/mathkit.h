@@ -27,6 +27,11 @@ using quat = glm::quat;
 struct aabb3 {
     vec3 min;
     vec3 max;
+
+    bool contains(vec3 point)
+    {
+        return all(greaterThanEqual(point, min)) && all(lessThanEqual(point, max));
+    }
 };
 
 namespace mathkit {
