@@ -3,6 +3,7 @@
 #include "Sphere.h"
 #include "VoxelGrid.h"
 #include "mathkit.h"
+#include <Eigen/Core>
 #include <bobyqa.h>
 #include <chrono>
 #include <fmt/format.h>
@@ -10,6 +11,7 @@
 #include <iomanip>
 #include <json.hpp>
 #include <random>
+#include <spherical_harmonics.h>
 #include <unordered_set>
 #include <vector>
 
@@ -586,48 +588,50 @@ vec3 raytraceMesh(const SimpleMesh& mesh, vec3 o, vec3 d)
 
 SphericalHarmonics generateSphericalHarmonics(vec3 sampleCenter, size_t numSamples, const SimpleMesh& mesh)
 {
-    SphericalHarmonics sh {};
 
-    std::mt19937_64 rng;
-    std::uniform_real_distribution<float> signedVal { -1.0f, +1.0f };
+    auto rgbFunction = [&](double phi, double theta) -> vec3 {
+        Eigen::Vector3d v = sh::ToVector(phi, theta);
+        vec3 direction = vec3(v.x(), v.y(), v.z());
+        vec3 Lsrgb = raytraceMesh(mesh, sampleCenter, direction);
+        return pow(Lsrgb, vec3(2.2f));
+    };
 
-    #pragma omp parallel for
-    for (int i = 0; i < numSamples; ++i) {
+    std::vector<double> r = *sh::ProjectFunction(
+        2, [&](double phi, double theta) -> double {
+            vec3 color = rgbFunction(phi, theta);
+            return color.r;
+        },
+        numSamples);
+    std::vector<double> g = *sh::ProjectFunction(
+        2, [&](double phi, double theta) -> double {
+            vec3 color = rgbFunction(phi, theta);
+            return color.g;
+        },
+        numSamples);
+    std::vector<double> b = *sh::ProjectFunction(
+        2, [&](double phi, double theta) -> double {
+            vec3 color = rgbFunction(phi, theta);
+            return color.b;
+        },
+        numSamples);
 
-        // Sample sphere uniformly
-        vec3 dir;
-        do {
-            dir.x = signedVal(rng);
-            dir.y = signedVal(rng);
-            dir.z = signedVal(rng);
-        } while (length2(dir) > 1.0f);
-        dir = normalize(dir);
+    assert(r.size() == 9);
+    assert(g.size() == 9);
+    assert(b.size() == 9);
 
-        vec3 L = raytraceMesh(mesh, sampleCenter, dir);
+    SphericalHarmonics sh;
 
-        float Y00 = 0.282095f;
-        float Y11 = 0.488603f * dir.x;
-        float Y10 = 0.488603f * dir.z;
-        float Y1_1 = 0.488603f * dir.y;
-        float Y21 = 1.092548f * dir.x * dir.z;
-        float Y2_1 = 1.092548f * dir.y * dir.z;
-        float Y2_2 = 1.092548f * dir.y * dir.x;
-        float Y20 = 0.946176f * dir.z * dir.z - 0.315392f;
-        float Y22 = 0.546274f * (dir.x * dir.x - dir.y * dir.y);
+    sh.L00 = vec3(r[0], g[0], b[0]);
 
-        #pragma omp critical
-        {
-            sh.L00 += L * Y00 / float(numSamples);
-            sh.L11 += L * Y11 / float(numSamples);
-            sh.L10 += L * Y10 / float(numSamples);
-            sh.L1_1 += L * Y1_1 / float(numSamples);
-            sh.L21 += L * Y21 / float(numSamples);
-            sh.L2_1 += L * Y2_1 / float(numSamples);
-            sh.L2_2 += L * Y2_2 / float(numSamples);
-            sh.L20 += L * Y20 / float(numSamples);
-            sh.L22 += L * Y22 / float(numSamples);
-        }
-    }
+    sh.L1_1 = vec3(r[1], g[1], b[1]);
+    sh.L10 = vec3(r[2], g[2], b[2]);
+    sh.L11 = vec3(r[3], g[3], b[3]);
+
+    sh.L2_2 = vec3(r[4], g[4], b[4]);
+    sh.L2_1 = vec3(r[5], g[5], b[5]);
+    sh.L20 = vec3(r[6], g[6], b[6]);
+    sh.L21 = vec3(r[7], g[7], b[7]);
+    sh.L22 = vec3(r[8], g[8], b[8]);
 
     return sh;
 }
@@ -662,13 +666,13 @@ void generateJsonOutput(const SphereSet& sphereSet, const std::string& outPath)
             { "radius", sphere.radius },
             { "sh",
               { { "L00", { sh.L00.x, sh.L00.y, sh.L00.z } },
-                { "L11", { sh.L11.x, sh.L11.y, sh.L11.z } },
-                { "L10", { sh.L10.x, sh.L10.y, sh.L10.z } },
                 { "L1_1", { sh.L1_1.x, sh.L1_1.y, sh.L1_1.z } },
-                { "L21", { sh.L21.x, sh.L21.y, sh.L21.z } },
-                { "L2_1", { sh.L2_1.x, sh.L2_1.y, sh.L2_1.z } },
+                { "L10", { sh.L10.x, sh.L10.y, sh.L10.z } },
+                { "L11", { sh.L11.x, sh.L11.y, sh.L11.z } },
                 { "L2_2", { sh.L2_2.x, sh.L2_2.y, sh.L2_2.z } },
+                { "L2_1", { sh.L2_1.x, sh.L2_1.y, sh.L2_1.z } },
                 { "L20", { sh.L20.x, sh.L20.y, sh.L20.z } },
+                { "L21", { sh.L21.x, sh.L21.y, sh.L21.z } },
                 { "L22", { sh.L22.x, sh.L22.y, sh.L22.z } } } }
         };
         j["spheres"].push_back(jsonSphere);

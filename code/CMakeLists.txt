@@ -25,8 +25,10 @@ target_compile_options(SphereSet PRIVATE ${PROXYGEN_WARNINGS})
 
 add_executable(BoundedSphereSet src/BoundedSphereSet.cpp)
 target_include_directories(BoundedSphereSet PUBLIC deps/nlohmann_json)
+target_include_directories(BoundedSphereSet PUBLIC deps/eigen-3.3.7)
 target_link_libraries(BoundedSphereSet PRIVATE ProxyGenLib)
 target_link_libraries(BoundedSphereSet PRIVATE bobyqa)
+target_link_libraries(BoundedSphereSet PRIVATE spherical_harmonics)
 target_compile_options(BoundedSphereSet PRIVATE ${PROXYGEN_WARNINGS} /openmp)
 
 add_executable(VoxelContours src/VoxelContours.cpp)
