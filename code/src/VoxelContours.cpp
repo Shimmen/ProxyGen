@@ -197,7 +197,7 @@ VoxelContour createContourFromConsensusTriangles(aabb3 aabb, const std::vector<T
 
     Plane plane;
     plane.normal = sharedNormal;
-    plane.distance = minDistance;
+    plane.distance = minDistance - 1e-4f;
 
     VoxelContour contour { aabb, plane };
     return contour;
@@ -205,7 +205,7 @@ VoxelContour createContourFromConsensusTriangles(aabb3 aabb, const std::vector<T
 
 VoxelContour createContourForSingleTriangle(aabb3 aabb, const Triangle& triangle)
 {
-    float distance = dot(triangle.v[0], triangle.normal);
+    float distance = dot(triangle.v[0], triangle.normal) - 1e-4f;
     Plane plane { triangle.normal, distance };
 
     VoxelContour contour { aabb, plane };
