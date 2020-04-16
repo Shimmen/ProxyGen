@@ -260,7 +260,9 @@ void writeResult(const std::string& outPath, const std::vector<VoxelContour>& co
     }
 
     j["colors"] = {};
-    for (const vec3& color : colors) {
+    for (const vec3& sRgbColor : colors) {
+        // (save in linear so we don't have to do extra work in the shaders)
+        vec3 color = pow(sRgbColor, vec3(2.2f));
         json jsonColor = { color.r, color.g, color.b };
         j["colors"].push_back(jsonColor);
     }
